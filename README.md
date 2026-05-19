@@ -4,7 +4,7 @@ An MCP server for querying SEC EDGAR filings. Built for AI agents and humans.
 
 ## Status
 
-**Build complete (weeks 1-4 shipped).** The RAG pipeline runs end-to-end against both single filings (`ask_filing`) and the entire ingested corpus (`ask_corpus`). The starter corpus spans AAPL, MSFT, JPM, BAC, and XOM. The formal evaluation harness in week 4 produced real, auditable metrics against a hand-curated 35-question golden set — numbers are in the Evaluation section below.
+The RAG pipeline runs end-to-end against both single filings (`ask_filing`) and the entire ingested corpus (`ask_corpus`). The starter corpus spans AAPL, MSFT, JPM, BAC, and XOM. A formal evaluation harness produces real, auditable metrics against a hand-curated 35-question golden set — numbers are in the Evaluation section below.
 
 ## Why this exists
 
@@ -34,11 +34,13 @@ src/filings_analyst/
 - `ask_filing(accession_no, ticker, question, k=6)` — RAG-backed Q&A over a single ingested filing. Returns a grounded answer plus the top-k cited chunks (section, chunk index, similarity score, excerpt). Filing must be ingested first via `filings-analyst ingest`.
 - `ask_corpus(question, tickers=None, accession_nos=None, k=8)` — RAG-backed Q&A across every ingested filing, optionally filtered by ticker or accession. Citations are ticker-tagged (`[AAPL Risk Factors §3]`) so the reader can tell which filing each excerpt came from, and the response includes a `filings_searched` manifest of the filings whose chunks actually contributed.
 
-## Roadmap
+## What's in the box
 
-- Week 2 (done) — chunking + embeddings + sqlite-vec + `ask_filing` tool (single-document RAG).
-- Week 3 (done) — `ask_corpus` tool for multi-filing retrieval across the starter universe (AAPL/MSFT/JPM/BAC/XOM); MD&A section extraction hardened for real-world heading variants (Apple-style curly apostrophes and non-breaking spaces, Microsoft-style cross-line splits); honest provider comparison documented below.
-- Week 4 (done) — formal eval harness with hand-curated 35-question golden set, five metrics (faithfulness / answer_relevancy / context_precision / context_recall + a hand-rolled refusal_correctness), markdown report writer with worst-3-per-metric, and a manual-trigger GitHub Actions workflow. Real numbers from a stratified 10-item sample run published below.
+- **Single-document RAG** — chunking, local embeddings (`all-MiniLM-L6-v2`), `sqlite-vec` retrieval, and grounded synthesis with inline citations, exposed as the `ask_filing` MCP tool.
+- **Corpus-wide RAG** — the same pipeline extended across every ingested filing in the starter universe (AAPL / MSFT / JPM / BAC / XOM), with ticker-tagged citations and a `filings_searched` manifest of which filings actually contributed; exposed as `ask_corpus`.
+- **Defensive section extraction** — Item-1 / 1A / 7 / 8 regex variants harden against the heading styles real filers use, including Apple-style curly apostrophes and non-breaking spaces and Microsoft-style cross-line heading splits.
+- **Honest provider comparison** — one canonical question answered by Claude CLI, OpenAI API, and a regex-only baseline, with real latency and cost reported transparently (documented below).
+- **Formal eval harness** — hand-curated 35-question golden set across the five tickers; five metrics (faithfulness / answer_relevancy / context_precision / context_recall + a hand-rolled refusal_correctness); markdown reporter with worst-3-per-metric; manual-trigger GitHub Actions workflow. Real numbers from a stratified 10-item sample published below.
 
 ## Quick start
 
@@ -85,7 +87,7 @@ Question: **"What did Apple say about AI risks in its most recent 10-K?"** Same 
 
 Methodology: same retrieval (k=6) for all three rows. Claude via `claude -p` on a Max 5x subscription (Agent SDK credit activates 2026-06-15; until then the call goes against the standard subscription quota). OpenAI via `gpt-4o-mini` at temperature 0 would compute actual token cost; this dev box has no `OPENAI_API_KEY` set, so that row is honestly blank rather than fabricated. Regex baseline returns the retrieved chunks verbatim with no synthesis at all (a `Here are the most relevant excerpts:` header + bullet list).
 
-What the comparison shows, honestly: on this question, Claude correctly refuses to answer ("the provided excerpts do not contain that information") because the top-6 retrieved chunks from local MiniLM embeddings don't actually contain Apple's AI-specific risk language — the most-similar Risk Factors chunks were about competition and IP licensing, not AI per se. The regex baseline is faster and free but offloads all the reading to the human. This is a useful real-world finding: at k=6 with MiniLM-L6-v2 embeddings, retrieval quality is the binding constraint, not the LLM. The week-4 eval harness quantifies exactly that on a golden set, below.
+What the comparison shows, honestly: on this question, Claude correctly refuses to answer ("the provided excerpts do not contain that information") because the top-6 retrieved chunks from local MiniLM embeddings don't actually contain Apple's AI-specific risk language — the most-similar Risk Factors chunks were about competition and IP licensing, not AI per se. The regex baseline is faster and free but offloads all the reading to the human. This is a useful real-world finding: at k=6 with MiniLM-L6-v2 embeddings, retrieval quality is the binding constraint, not the LLM. The Evaluation section below quantifies exactly that on a golden set rather than leaving it as a single-question anecdote.
 
 ## Evaluation
 
@@ -160,7 +162,7 @@ Cursor uses an equivalent `mcpServers` block in its settings. The server speaks 
 
 ## AI providers
 
-Five backends are configurable via the `LLM_PROVIDER` env var (deterministic tools in week 1 don't use the LLM yet; this matters once RAG lands):
+Five backends are configurable via the `LLM_PROVIDER` env var. The deterministic tools (`search_filings`, `get_filing`, `extract_section`) don't call the LLM; the RAG tools (`ask_filing`, `ask_corpus`) and the eval grader do.
 
 - `auto` (default) — tries Anthropic API → OpenAI API → Claude CLI in order.
 - `anthropic_api` — requires `ANTHROPIC_API_KEY`. Uses `claude-haiku-4-5` by default (`ANTHROPIC_MODEL` overrides).

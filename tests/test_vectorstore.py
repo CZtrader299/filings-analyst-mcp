@@ -181,7 +181,7 @@ def test_schema_migration_adds_filing_date_column(tmp_path: Path):
     import sqlite_vec
 
     db = tmp_path / "old.db"
-    # Hand-build a pre-week-3 schema (no filing_date column).
+    # Hand-build a legacy schema (no filing_date column).
     conn = sqlite3.connect(db)
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)

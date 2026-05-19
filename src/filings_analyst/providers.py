@@ -2,8 +2,8 @@
 
 Mirrors the pattern from Dan's LSE Buyback Scraper ``ai_reviewer.py``, but
 simpler: we only need free-form text generation here, not JSON-schema
-constrained extraction. The eval harness in a future week may need
-structured output; we'll extend this then rather than now.
+constrained extraction. If a downstream caller (e.g. a future eval-time
+grader) needs structured output, extend this then rather than now.
 
 Providers (priority order for ``"auto"``):
 

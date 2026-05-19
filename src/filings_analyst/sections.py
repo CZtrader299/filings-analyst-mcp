@@ -14,16 +14,16 @@ Targets:
 * ``MD&A`` — Item 7 (Management's Discussion and Analysis)
 * ``Financial Statements`` — Item 8 (header marker only, not parsed contents)
 
-Heading variants seen in real filings (week-3 hardening notes):
+Heading variants seen in real filings:
 
 * Apple's 2025 10-K (accession ``0000320193-25-000079``) uses
   ``Item 7.&#160;&#160;&#160;&#160;Management&#8217;s Discussion and
   Analysis of Financial Condition and Results of Operations``. After
   BeautifulSoup decodes entities, the apostrophe becomes the curly
   ``’`` rather than ``'``, and the inter-token space becomes
-  ``\xa0`` (non-breaking space). The pre-week-3 regex anchored on a
-  literal ASCII apostrophe followed by ``\\s+DISCUSSION``, so MD&A
-  came back empty.
+  ``\xa0`` (non-breaking space). An earlier version of this regex
+  anchored on a literal ASCII apostrophe followed by ``\\s+DISCUSSION``,
+  so MD&A came back empty against this filing.
 * Other filers use ALL CAPS (``ITEM 7.``), drop the trailing period,
   wrap the heading in ``<b>``, or omit the space between the item
   number and the title. We normalize whitespace + quotes on the

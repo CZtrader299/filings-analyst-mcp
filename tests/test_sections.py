@@ -59,10 +59,10 @@ def test_clean_section_text_handles_empty():
     assert sections.clean_section_text("   \n\n  ") == ""
 
 
-# --- Week 3: heading-variant regression tests --------------------------
+# --- Heading-variant regression tests ----------------------------------
 #
 # These exercise the formattings observed in real filings (Apple 2025
-# 10-K and similar) that the pre-week-3 regex missed.
+# 10-K and similar) that an earlier version of the regex missed.
 
 
 def _build_aapl_style_html() -> str:

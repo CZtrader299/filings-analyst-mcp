@@ -15,7 +15,7 @@ Schema:
         section       TEXT NOT NULL,
         chunk_idx     INTEGER NOT NULL,
         text          TEXT NOT NULL,
-        filing_date   TEXT             -- added week 3, nullable for back-compat
+        filing_date   TEXT             -- nullable for back-compat with older dbs
     );
 
     -- vec0 virtual table for similarity search
@@ -103,7 +103,7 @@ class VectorStore:
             "CREATE INDEX IF NOT EXISTS idx_chunk_meta_ticker "
             "ON chunk_meta(ticker)"
         )
-        # Migration: older dbs (week 2) don't have the filing_date column.
+        # Migration: older dbs don't have the filing_date column.
         # ``ALTER TABLE ADD COLUMN`` is no-op-safe if we guard it with a
         # PRAGMA introspection — sqlite has no IF NOT EXISTS on ADD COLUMN.
         cur.execute("PRAGMA table_info(chunk_meta)")
