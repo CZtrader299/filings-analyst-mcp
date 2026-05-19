@@ -174,6 +174,106 @@ def test_prompt_includes_numbered_context_and_section_labels():
     assert "[Section §chunk_idx]" in prompt
 
 
+def _seed_cache_with_meta(
+    tmp_path: Path, ticker: str, accession_no: str, filing_date: str
+) -> None:
+    target = tmp_path / ticker / "10-K" / accession_no
+    target.mkdir(parents=True)
+    (target / "full-text.html").write_text(
+        FIXTURE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (target / "metadata.json").write_text(
+        json.dumps(
+            {
+                "accession_no": accession_no,
+                "ticker": ticker,
+                "form_type": "10-K",
+                "filing_date": filing_date,
+                "period_end": filing_date,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_ask_corpus_retrieves_across_multiple_tickers(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(edgar.config, "CACHE_DIR", tmp_path)
+    _seed_cache_with_meta(tmp_path, "AAPL", "0000320193-24-000123", "2024-11-01")
+    _seed_cache_with_meta(tmp_path, "MSFT", "0000789019-24-000044", "2024-07-30")
+    rag_inst = _make_rag(
+        tmp_path, llm_response="AAPL and MSFT both mention AI. [AAPL Risk Factors §0]"
+    )
+    rag_inst.ingest_filing("0000320193-24-000123", "AAPL")
+    rag_inst.ingest_filing("0000789019-24-000044", "MSFT")
+
+    result = rag_inst.ask_corpus("What do they say about risks?", k=8)
+    assert result["answer"]
+    assert result["cited_chunks"], "expected cited chunks"
+    # filings_searched should include both tickers since both were ingested.
+    tickers_in_results = {f["ticker"] for f in result["filings_searched"]}
+    assert "AAPL" in tickers_in_results
+    assert "MSFT" in tickers_in_results
+    # Each cited chunk surfaces its ticker + accession_no + filing_date.
+    for c in result["cited_chunks"]:
+        assert "ticker" in c
+        assert "accession_no" in c
+        assert "filing_date" in c
+    rag_inst.close()
+
+
+def test_ask_corpus_ticker_filter(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(edgar.config, "CACHE_DIR", tmp_path)
+    _seed_cache_with_meta(tmp_path, "AAPL", "0000320193-24-000123", "2024-11-01")
+    _seed_cache_with_meta(tmp_path, "MSFT", "0000789019-24-000044", "2024-07-30")
+    rag_inst = _make_rag(tmp_path, llm_response="ok")
+    rag_inst.ingest_filing("0000320193-24-000123", "AAPL")
+    rag_inst.ingest_filing("0000789019-24-000044", "MSFT")
+
+    result = rag_inst.ask_corpus("Q?", tickers=["AAPL"], k=8)
+    tickers_in_results = {c["ticker"] for c in result["cited_chunks"]}
+    assert tickers_in_results == {"AAPL"}
+    rag_inst.close()
+
+
+def test_ask_corpus_empty_store_returns_error(tmp_path: Path):
+    rag_inst = _make_rag(tmp_path, llm_response="should not be called")
+    result = rag_inst.ask_corpus("Q?")
+    assert result["answer"] is None
+    assert "error" in result
+    assert "ingested" in result["error"].lower()
+    rag_inst.close()
+
+
+def test_ask_corpus_no_llm_available(tmp_path: Path):
+    rag_inst = _make_rag(tmp_path, llm_response=None)
+    result = rag_inst.ask_corpus("Q?")
+    assert result["answer"] is None
+    assert "error" in result
+    assert "no llm" in result["error"].lower()
+
+
+def test_ask_corpus_prompt_uses_ticker_citation_format():
+    chunks = [
+        {
+            "ticker": "AAPL",
+            "section": "Risk Factors",
+            "chunk_idx": 0,
+            "text": "Supply chain risk.",
+        },
+        {
+            "ticker": "MSFT",
+            "section": "MD&A",
+            "chunk_idx": 4,
+            "text": "Cloud revenue grew.",
+        },
+    ]
+    prompt = rag._build_corpus_prompt("Compare them.", chunks)
+    assert "[1] AAPL | Section: Risk Factors §0" in prompt
+    assert "[2] MSFT | Section: MD&A §4" in prompt
+    assert "[TICKER Section §chunk_idx]" in prompt
+    assert "[AAPL Risk Factors §3]" in prompt  # example in instructions
+
+
 def test_ask_filing_passes_prompt_to_llm(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(edgar.config, "CACHE_DIR", tmp_path)
     accession = "0000320193-24-000123"

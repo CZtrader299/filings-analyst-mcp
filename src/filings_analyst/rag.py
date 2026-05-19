@@ -9,13 +9,16 @@ Ties together:
 * :mod:`filings_analyst.vectorstore` — sqlite-vec retrieval.
 * :mod:`filings_analyst.providers` — pluggable LLM backend for synthesis.
 
-The orchestrator deliberately keeps two distinct verbs:
+The orchestrator deliberately keeps three distinct verbs:
 
 * ``ingest_filing`` — chunk + embed + store. Idempotent (re-ingestion
   wipes the prior chunks first so re-runs don't double-count).
-* ``ask_filing`` — retrieve + synthesize a grounded answer with citations.
-
-Multi-filing retrieval (``ask_corpus``) is week 3 — not implemented here.
+* ``ask_filing`` — retrieve + synthesize a grounded answer for one
+  filing, with citations.
+* ``ask_corpus`` — retrieve + synthesize across every ingested filing
+  (optionally filtered by ticker or accession), with citations that
+  include the ticker so a reader can tell which filing each excerpt
+  came from.
 """
 
 from __future__ import annotations
@@ -63,6 +66,46 @@ def _build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
         "excerpts do not contain that information.\"\n\n"
         "Cite excerpts inline using `[Section §chunk_idx]` notation matching "
         "the labels shown.\n\n"
+        f"=== Context ===\n{context}\n\n"
+        f"=== Question ===\n{question}\n\n"
+        "=== Answer ==="
+    )
+
+
+def _build_corpus_context_block(chunks: list[dict[str, Any]]) -> str:
+    """Format retrieved chunks with ticker-prefixed citation labels.
+
+    Each chunk gets a label like ``[AAPL Risk Factors §3]`` so that when
+    the LLM cites inline, the reader can tell which filing the excerpt
+    came from. Without the ticker prefix, citations across a multi-filing
+    corpus are ambiguous (every filing has a ``Risk Factors §0``).
+    """
+    lines: list[str] = []
+    for i, chunk in enumerate(chunks, start=1):
+        ticker = chunk.get("ticker", "?")
+        section = chunk.get("section", "?")
+        idx = chunk.get("chunk_idx", "?")
+        text = chunk.get("text", "").strip()
+        lines.append(f"[{i}] {ticker} | Section: {section} §{idx}\n{text}")
+    return "\n\n".join(lines)
+
+
+def _build_corpus_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
+    """Compose the multi-filing synthesis prompt.
+
+    Differs from the single-filing prompt only in the citation format
+    instruction: corpus citations must include the ticker so a reader
+    knows which company each fact came from.
+    """
+    context = _build_corpus_context_block(chunks)
+    return (
+        "Use ONLY the context excerpts below to answer the question. If "
+        "the answer is not present in the context, reply: \"The provided "
+        "excerpts do not contain that information.\"\n\n"
+        "Cite excerpts inline using `[TICKER Section §chunk_idx]` notation "
+        "matching the labels shown (e.g., `[AAPL Risk Factors §3]`). Each "
+        "factual claim must carry a citation so the reader can tell which "
+        "filing it came from.\n\n"
         f"=== Context ===\n{context}\n\n"
         f"=== Question ===\n{question}\n\n"
         "=== Answer ==="
@@ -130,6 +173,16 @@ class FilingRAG:
                 ),
             }
 
+        # Best-effort metadata fetch so we can tag chunks with filing_date.
+        # Older cached filings without metadata.json shouldn't break ingest,
+        # so we swallow the FileNotFoundError silently.
+        filing_date: Optional[str] = None
+        try:
+            meta = edgar.load_cached_metadata(ticker, accession_no)
+            filing_date = meta.get("filing_date") or meta.get("period_end")
+        except FileNotFoundError:
+            filing_date = None
+
         extracted = sections.extract_sections(html)
         chunk_records = chunking.chunk_sections(
             extracted,
@@ -158,6 +211,8 @@ class FilingRAG:
             rec["accession_no"] = accession_no
             rec["ticker"] = ticker.upper()
             rec["embedding"] = vec
+            if filing_date:
+                rec["filing_date"] = filing_date
 
         store = self._open_store()
         store.delete_filing(accession_no)
@@ -243,6 +298,140 @@ class FilingRAG:
             "question": question,
             "answer": answer,
             "cited_chunks": cited,
+            "provider": self.llm.provider,
+        }
+        if answer is None:
+            result["error"] = "LLM call returned no content (see warnings above)"
+        return result
+
+    # --- Multi-filing query ---------------------------------------------
+
+    def ask_corpus(
+        self,
+        question: str,
+        *,
+        tickers: Optional[list[str]] = None,
+        accession_nos: Optional[list[str]] = None,
+        k: int = 8,
+    ) -> dict[str, Any]:
+        """Answer a question by retrieving across ALL ingested filings.
+
+        Args:
+            question: Natural-language question.
+            tickers: Optional filter — restrict retrieval to filings for
+                these tickers (case-insensitive).
+            accession_nos: Optional filter — restrict to specific
+                accession numbers.
+            k: Number of chunks to retrieve.
+
+        Returns a dict with:
+
+        * ``question`` — the input question.
+        * ``answer`` — the synthesized answer, or ``None`` on failure.
+        * ``cited_chunks`` — each retrieved chunk, including
+          ``ticker``, ``accession_no``, ``filing_date``, ``section``,
+          ``chunk_idx``, ``text``, ``score``.
+        * ``filings_searched`` — the unique filings whose chunks
+          appeared in the retrieved set, so the reader knows which
+          filings actually contributed (not the whole corpus).
+        * ``provider`` — the LLM provider used.
+        """
+        if not self.llm.available:
+            return {
+                "question": question,
+                "answer": None,
+                "cited_chunks": [],
+                "filings_searched": [],
+                "provider": "none",
+                "error": (
+                    "No LLM provider available — set ANTHROPIC_API_KEY, "
+                    "OPENAI_API_KEY, or install the Claude CLI."
+                ),
+            }
+
+        store = self._open_store()
+        if store.count() == 0:
+            return {
+                "question": question,
+                "answer": None,
+                "cited_chunks": [],
+                "filings_searched": [],
+                "provider": self.llm.provider,
+                "error": (
+                    "No filings ingested. "
+                    "Run `filings-analyst ingest <ticker>` first."
+                ),
+            }
+
+        query_vec = self.embedder.embed_query(question)
+        if query_vec is None:
+            return {
+                "question": question,
+                "answer": None,
+                "cited_chunks": [],
+                "filings_searched": [],
+                "provider": self.llm.provider,
+                "error": "Embedding backend failed to embed the question",
+            }
+
+        hits = store.search(
+            query_vec,
+            k=k,
+            filter_tickers=tickers,
+            filter_accession_nos=accession_nos,
+        )
+        if not hits:
+            return {
+                "question": question,
+                "answer": None,
+                "cited_chunks": [],
+                "filings_searched": [],
+                "provider": self.llm.provider,
+                "error": (
+                    "No matching chunks found in the corpus for the "
+                    "given filters."
+                ),
+            }
+
+        prompt = _build_corpus_prompt(question, hits)
+        answer = self.llm.generate(prompt, max_tokens=1024, system=_SYSTEM_PROMPT)
+
+        cited = [
+            {
+                "ticker": h["ticker"],
+                "accession_no": h["accession_no"],
+                "filing_date": h.get("filing_date", ""),
+                "section": h["section"],
+                "chunk_idx": h["chunk_idx"],
+                "text": h["text"],
+                "score": h["score"],
+            }
+            for h in hits
+        ]
+
+        # filings_searched: deduplicated by (ticker, accession_no) and
+        # ordered by first appearance in the retrieved set so the most
+        # relevant filing leads.
+        seen: set[tuple[str, str]] = set()
+        filings_searched: list[dict[str, Any]] = []
+        for h in hits:
+            key = (h["ticker"], h["accession_no"])
+            if key in seen:
+                continue
+            seen.add(key)
+            filings_searched.append(
+                {
+                    "ticker": h["ticker"],
+                    "accession_no": h["accession_no"],
+                    "filing_date": h.get("filing_date", ""),
+                }
+            )
+
+        result: dict[str, Any] = {
+            "question": question,
+            "answer": answer,
+            "cited_chunks": cited,
+            "filings_searched": filings_searched,
             "provider": self.llm.provider,
         }
         if answer is None:

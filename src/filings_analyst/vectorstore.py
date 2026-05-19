@@ -14,7 +14,8 @@ Schema:
         ticker        TEXT NOT NULL,
         section       TEXT NOT NULL,
         chunk_idx     INTEGER NOT NULL,
-        text          TEXT NOT NULL
+        text          TEXT NOT NULL,
+        filing_date   TEXT             -- added week 3, nullable for back-compat
     );
 
     -- vec0 virtual table for similarity search
@@ -89,7 +90,8 @@ class VectorStore:
                 ticker        TEXT NOT NULL,
                 section       TEXT NOT NULL,
                 chunk_idx     INTEGER NOT NULL,
-                text          TEXT NOT NULL
+                text          TEXT NOT NULL,
+                filing_date   TEXT
             )
             """
         )
@@ -97,6 +99,17 @@ class VectorStore:
             "CREATE INDEX IF NOT EXISTS idx_chunk_meta_accession "
             "ON chunk_meta(accession_no)"
         )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chunk_meta_ticker "
+            "ON chunk_meta(ticker)"
+        )
+        # Migration: older dbs (week 2) don't have the filing_date column.
+        # ``ALTER TABLE ADD COLUMN`` is no-op-safe if we guard it with a
+        # PRAGMA introspection — sqlite has no IF NOT EXISTS on ADD COLUMN.
+        cur.execute("PRAGMA table_info(chunk_meta)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        if "filing_date" not in existing_cols:
+            cur.execute("ALTER TABLE chunk_meta ADD COLUMN filing_date TEXT")
         # vec0 virtual table — needs an explicit dim baked into the schema.
         cur.execute(
             f"""
@@ -137,7 +150,8 @@ class VectorStore:
             cur.execute("DELETE FROM chunk_vec WHERE chunk_id = ?", (chunk_id,))
             cur.execute(
                 "INSERT INTO chunk_meta(chunk_id, accession_no, ticker, "
-                "section, chunk_idx, text) VALUES (?, ?, ?, ?, ?, ?)",
+                "section, chunk_idx, text, filing_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     chunk_id,
                     rec["accession_no"],
@@ -145,6 +159,7 @@ class VectorStore:
                     rec["section"],
                     int(rec["chunk_idx"]),
                     rec["text"],
+                    rec.get("filing_date"),
                 ),
             )
             cur.execute(
@@ -187,12 +202,21 @@ class VectorStore:
         query_embedding: list[float],
         k: int = 6,
         filter_accession_no: Optional[str] = None,
+        filter_tickers: Optional[list[str]] = None,
+        filter_accession_nos: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
-        """Top-k similarity search, optionally filtered by accession.
+        """Top-k similarity search, optionally filtered by accession/tickers.
 
         Returns records with all metadata fields plus a ``score`` field
         (cosine distance — lower is closer; we surface that as-is rather
         than reshaping into a similarity to keep the math honest).
+
+        Filters are AND-combined and all use the same over-fetch +
+        post-filter pattern as ``filter_accession_no`` — vec0 doesn't
+        accept arbitrary WHERE predicates against the metadata table, so
+        we widen ``k`` then trim. Fine when the post-filter set is large
+        relative to ``k``; degrades only when callers ask for a narrow
+        slice of an enormous corpus.
         """
         if len(query_embedding) != self.dim:
             raise ValueError(
@@ -201,10 +225,20 @@ class VectorStore:
         cur = self.conn.cursor()
         blob = _vec_to_blob(query_embedding)
 
-        if filter_accession_no:
-            # Two-stage: pull candidate ids for the accession, then knn over them.
-            # vec0 supports `chunk_id IN (...)` only via its rowid; the cleanest
-            # filter is to over-fetch then post-filter — fine for k<<corpus.
+        # Normalize ticker filter to uppercase for case-insensitive matching.
+        ticker_set: Optional[set[str]] = None
+        if filter_tickers:
+            ticker_set = {t.upper() for t in filter_tickers if t}
+            if not ticker_set:
+                ticker_set = None
+        accession_set: Optional[set[str]] = None
+        if filter_accession_nos:
+            accession_set = {a for a in filter_accession_nos if a}
+            if not accession_set:
+                accession_set = None
+
+        any_filter = bool(filter_accession_no or ticker_set or accession_set)
+        if any_filter:
             over_k = max(k * 8, 64)
             cur.execute(
                 """
@@ -215,16 +249,24 @@ class VectorStore:
                 """,
                 (blob, over_k),
             )
-            hits = cur.fetchall()
+            raw_hits = cur.fetchall()
             filtered: list[tuple[str, float]] = []
-            for chunk_id, distance in hits:
+            for chunk_id, distance in raw_hits:
                 cur.execute(
-                    "SELECT accession_no FROM chunk_meta WHERE chunk_id = ?",
+                    "SELECT accession_no, ticker FROM chunk_meta WHERE chunk_id = ?",
                     (chunk_id,),
                 )
                 row = cur.fetchone()
-                if row and row[0] == filter_accession_no:
-                    filtered.append((chunk_id, distance))
+                if not row:
+                    continue
+                accession_no, ticker = row[0], row[1]
+                if filter_accession_no and accession_no != filter_accession_no:
+                    continue
+                if accession_set is not None and accession_no not in accession_set:
+                    continue
+                if ticker_set is not None and (ticker or "").upper() not in ticker_set:
+                    continue
+                filtered.append((chunk_id, distance))
                 if len(filtered) >= k:
                     break
             hits = filtered
@@ -243,8 +285,8 @@ class VectorStore:
         out: list[dict[str, Any]] = []
         for chunk_id, distance in hits:
             cur.execute(
-                "SELECT accession_no, ticker, section, chunk_idx, text "
-                "FROM chunk_meta WHERE chunk_id = ?",
+                "SELECT accession_no, ticker, section, chunk_idx, text, "
+                "filing_date FROM chunk_meta WHERE chunk_id = ?",
                 (chunk_id,),
             )
             row = cur.fetchone()
@@ -258,6 +300,7 @@ class VectorStore:
                     "section": row[2],
                     "chunk_idx": int(row[3]),
                     "text": row[4],
+                    "filing_date": row[5] or "",
                     "score": float(distance),
                 }
             )

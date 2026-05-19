@@ -118,6 +118,104 @@ def test_invalid_dim_raises(tmp_path: Path):
         VectorStore(tmp_path / "v.db", dim=-5)
 
 
+def test_search_filter_tickers(tmp_path: Path):
+    store = VectorStore(tmp_path / "v.db", dim=3)
+    # Two filings under different tickers.
+    rec_aapl = _make_records(accession_no="A-1")
+    rec_msft = [{**r, "ticker": "MSFT", "accession_no": "M-1"} for r in _make_records()]
+    store.add_chunks(rec_aapl)
+    store.add_chunks(rec_msft)
+
+    hits = store.search([1.0, 0.0, 0.0], k=3, filter_tickers=["AAPL"])
+    assert hits
+    assert all(h["ticker"] == "AAPL" for h in hits)
+
+    # Case-insensitive — lowercase ticker should still match.
+    hits_lower = store.search([1.0, 0.0, 0.0], k=3, filter_tickers=["aapl"])
+    assert hits_lower
+    assert all(h["ticker"] == "AAPL" for h in hits_lower)
+
+    # Both tickers passed -> both can show up.
+    hits_both = store.search([1.0, 0.0, 0.0], k=6, filter_tickers=["AAPL", "MSFT"])
+    tickers = {h["ticker"] for h in hits_both}
+    assert tickers == {"AAPL", "MSFT"}
+    store.close()
+
+
+def test_search_filter_accession_nos_list(tmp_path: Path):
+    store = VectorStore(tmp_path / "v.db", dim=3)
+    store.add_chunks(_make_records(accession_no="A-1"))
+    store.add_chunks(_make_records(accession_no="A-2"))
+    store.add_chunks(_make_records(accession_no="A-3"))
+    hits = store.search(
+        [1.0, 0.0, 0.0], k=6, filter_accession_nos=["A-1", "A-3"]
+    )
+    accs = {h["accession_no"] for h in hits}
+    assert accs.issubset({"A-1", "A-3"})
+    assert accs
+    store.close()
+
+
+def test_search_returns_filing_date_when_present(tmp_path: Path):
+    store = VectorStore(tmp_path / "v.db", dim=3)
+    recs = _make_records()
+    for r in recs:
+        r["filing_date"] = "2024-11-01"
+    store.add_chunks(recs)
+    hits = store.search([1.0, 0.0, 0.0], k=1)
+    assert hits[0]["filing_date"] == "2024-11-01"
+    store.close()
+
+
+def test_search_filing_date_blank_when_absent(tmp_path: Path):
+    store = VectorStore(tmp_path / "v.db", dim=3)
+    store.add_chunks(_make_records())  # no filing_date in records
+    hits = store.search([1.0, 0.0, 0.0], k=1)
+    assert hits[0]["filing_date"] == ""
+    store.close()
+
+
+def test_schema_migration_adds_filing_date_column(tmp_path: Path):
+    """Old dbs without filing_date should upgrade gracefully."""
+    import sqlite3
+    import sqlite_vec
+
+    db = tmp_path / "old.db"
+    # Hand-build a pre-week-3 schema (no filing_date column).
+    conn = sqlite3.connect(db)
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    conn.execute(
+        """
+        CREATE TABLE chunk_meta (
+            chunk_id TEXT PRIMARY KEY,
+            accession_no TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            section TEXT NOT NULL,
+            chunk_idx INTEGER NOT NULL,
+            text TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE VIRTUAL TABLE chunk_vec USING vec0("
+        "chunk_id TEXT PRIMARY KEY, embedding FLOAT[3])"
+    )
+    conn.commit()
+    conn.close()
+
+    # Open via VectorStore — migration should add the column.
+    store = VectorStore(db, dim=3)
+    cur = store.conn.execute("PRAGMA table_info(chunk_meta)")
+    cols = {row[1] for row in cur.fetchall()}
+    assert "filing_date" in cols
+    # And add_chunks should still work after migration.
+    store.add_chunks(_make_records())
+    assert store.count() == 3
+    store.close()
+
+
 def test_creates_parent_dir(tmp_path: Path):
     target = tmp_path / "nested" / "dir" / "v.db"
     store = VectorStore(target, dim=3)

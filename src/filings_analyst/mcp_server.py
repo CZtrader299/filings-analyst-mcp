@@ -1,13 +1,14 @@
 """MCP server exposing 10-K query tools over stdio.
 
-Four tools today:
+Five tools today:
 
 * ``search_filings`` — list available filings for a ticker.
 * ``get_filing`` — return metadata + preview of a filing's full text.
 * ``extract_section`` — return a named section from a filing.
 * ``ask_filing`` — RAG-backed Q&A over a single ingested filing.
-
-Multi-filing retrieval (``ask_corpus``) lands in week 3.
+* ``ask_corpus`` — RAG-backed Q&A across every ingested filing
+  (optionally filtered by ticker or accession). Returns ticker-tagged
+  citations so the reader knows which filing each excerpt came from.
 
 Run with::
 
@@ -126,6 +127,51 @@ def tool_extract_section(
     if not text:
         out["error"] = "Section not found in this filing"
     return out
+
+
+def tool_ask_corpus(
+    question: str,
+    tickers: Optional[list[str]] = None,
+    accession_nos: Optional[list[str]] = None,
+    k: int = 8,
+    rag: Optional[Any] = None,
+) -> dict[str, Any]:
+    """RAG-backed Q&A across every ingested filing.
+
+    Args:
+        question: Natural-language question.
+        tickers: Optional list of tickers to restrict retrieval to.
+        accession_nos: Optional list of accession numbers to restrict
+            retrieval to.
+        k: Top-k chunks to retrieve.
+        rag: Test injection hook; production callers pass ``None``.
+    """
+    if rag is None:
+        from .rag import FilingRAG
+
+        try:
+            rag = FilingRAG()
+        except ImportError as exc:
+            return {
+                "question": question,
+                "error": (
+                    f"RAG dependencies not installed: {exc}. "
+                    'Run `pip install -e ".[embeddings]"`.'
+                ),
+            }
+
+    try:
+        return rag.ask_corpus(
+            question,
+            tickers=tickers,
+            accession_nos=accession_nos,
+            k=k,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "question": question,
+            "error": f"ask_corpus failed: {exc}",
+        }
 
 
 def tool_ask_filing(
@@ -249,6 +295,35 @@ def _build_server():
                 },
             ),
             Tool(
+                name="ask_corpus",
+                description=(
+                    "Answer a natural-language question across every "
+                    "ingested 10-K filing (optionally filtered by ticker "
+                    "or accession number). Returns the answer plus the "
+                    "cited chunks — each tagged with the ticker, "
+                    "accession_no, and filing_date so the reader knows "
+                    "which filing each excerpt came from — and a "
+                    "filings_searched manifest of the filings whose "
+                    "chunks actually contributed."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "tickers": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "accession_nos": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "k": {"type": "integer", "default": 8},
+                    },
+                    "required": ["question"],
+                },
+            ),
+            Tool(
                 name="extract_section",
                 description=(
                     "Return one named section from a cached 10-K. "
@@ -295,6 +370,13 @@ def _build_server():
                 ticker=arguments["ticker"],
                 question=arguments["question"],
                 k=arguments.get("k", 6),
+            )
+        elif name == "ask_corpus":
+            result = tool_ask_corpus(
+                question=arguments["question"],
+                tickers=arguments.get("tickers"),
+                accession_nos=arguments.get("accession_nos"),
+                k=arguments.get("k", 8),
             )
         else:
             result = {"error": f"Unknown tool: {name}"}

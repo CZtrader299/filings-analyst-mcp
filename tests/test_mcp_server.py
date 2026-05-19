@@ -131,6 +131,36 @@ def test_tool_ask_filing_delegates_to_rag():
     assert out["ticker"] == "AAPL"
 
 
+def test_tool_ask_corpus_delegates_to_rag():
+    fake_rag = MagicMock()
+    fake_rag.ask_corpus.return_value = {
+        "question": "Q?",
+        "answer": "A.",
+        "cited_chunks": [],
+        "filings_searched": [],
+        "provider": "anthropic_api",
+    }
+    out = mcp_server.tool_ask_corpus(
+        question="Q?",
+        tickers=["AAPL", "MSFT"],
+        accession_nos=None,
+        k=8,
+        rag=fake_rag,
+    )
+    fake_rag.ask_corpus.assert_called_once_with(
+        "Q?", tickers=["AAPL", "MSFT"], accession_nos=None, k=8
+    )
+    assert out["answer"] == "A."
+
+
+def test_tool_ask_corpus_handles_exception():
+    fake_rag = MagicMock()
+    fake_rag.ask_corpus.side_effect = RuntimeError("boom")
+    out = mcp_server.tool_ask_corpus(question="Q?", rag=fake_rag)
+    assert "error" in out
+    assert "boom" in out["error"]
+
+
 def test_tool_ask_filing_handles_exception():
     fake_rag = MagicMock()
     fake_rag.ask_filing.side_effect = RuntimeError("boom")

@@ -124,6 +124,12 @@ class LLMProvider:
     def _run_claude_cli(self, prompt: str, system: Optional[str]) -> Optional[str]:
         claude_path = shutil.which("claude") or "claude"
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        # SEC filings contain typographic characters (curly quotes,
+        # non-breaking hyphens, en/em dashes) that crash Windows'
+        # default cp1252 stdin encoding when piped to a subprocess.
+        # Encode to UTF-8 bytes explicitly and pass via the bytes
+        # interface so Python doesn't try to apply the console codepage.
+        encoded = full_prompt.encode("utf-8", errors="replace")
         try:
             result = subprocess.run(
                 [
@@ -133,18 +139,28 @@ class LLMProvider:
                     "--output-format",
                     "text",
                 ],
-                input=full_prompt,
+                input=encoded,
                 capture_output=True,
-                text=True,
                 timeout=config.LLM_TIMEOUT,
                 env=self._clean_env(),
             )
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError from exc
+        # Tests mock subprocess.run with text results; production passes
+        # bytes through since we don't pass text=True. Handle both.
+        def _to_text(blob: object) -> str:
+            if blob is None:
+                return ""
+            if isinstance(blob, bytes):
+                return blob.decode("utf-8", errors="replace")
+            return str(blob)
+
         if result.returncode != 0:
-            print(f"  Warning: Claude CLI exited {result.returncode}: {result.stderr[:200]}")
+            stderr_text = _to_text(result.stderr)
+            print(f"  Warning: Claude CLI exited {result.returncode}: {stderr_text[:200]}")
             return None
-        return result.stdout.strip() or None
+        stdout_text = _to_text(result.stdout)
+        return stdout_text.strip() or None
 
     def _run_anthropic_api(
         self, prompt: str, max_tokens: int, system: Optional[str]

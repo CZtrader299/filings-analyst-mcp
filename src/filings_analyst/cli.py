@@ -6,6 +6,7 @@ Subcommands:
   + store unless ``--no-embed`` is passed.
 * ``show-sections`` — print extracted sections for a cached filing.
 * ``ask`` — RAG Q&A against one ingested filing.
+* ``ask-corpus`` — RAG Q&A across every ingested filing.
 * ``serve-mcp`` — launch the MCP server over stdio.
 """
 
@@ -157,6 +158,67 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     return 0 if result.get("answer") else 1
 
 
+def _cmd_ask_corpus(args: argparse.Namespace) -> int:
+    try:
+        from .rag import FilingRAG
+    except ImportError as exc:
+        print(f"Error: RAG dependencies not installed: {exc}", file=sys.stderr)
+        print('Hint: run `pip install -e ".[embeddings]"`.', file=sys.stderr)
+        return 2
+
+    tickers: list[str] | None = None
+    if args.tickers:
+        tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    accession_nos: list[str] | None = None
+    if args.accession_nos:
+        accession_nos = [
+            a.strip() for a in args.accession_nos.split(",") if a.strip()
+        ]
+
+    rag = FilingRAG()
+    result = rag.ask_corpus(
+        args.question,
+        tickers=tickers,
+        accession_nos=accession_nos,
+        k=args.k,
+    )
+
+    print(f"Q: {result['question']}\n")
+    print("A:")
+    if result.get("answer"):
+        wrapped = textwrap.fill(
+            result["answer"], width=88, replace_whitespace=False
+        )
+        print(wrapped)
+    else:
+        print("(no answer)")
+        if "error" in result:
+            print(f"\nError: {result['error']}")
+    print()
+    print(f"Provider: {result.get('provider', 'unknown')}")
+
+    searched = result.get("filings_searched") or []
+    if searched:
+        print(f"\nFilings searched ({len(searched)}):")
+        for f in searched:
+            date = f.get("filing_date", "")
+            date_suffix = f" (filed {date})" if date else ""
+            print(f"  - {f['ticker']}  {f['accession_no']}{date_suffix}")
+
+    cited = result.get("cited_chunks") or []
+    if cited:
+        print(f"\nCited chunks ({len(cited)}):")
+        for c in cited:
+            snippet = c["text"][:80].replace("\n", " ")
+            print(
+                f"  - [{c['ticker']} {c['section']} §{c['chunk_idx']}] "
+                f"score={c['score']:.4f}  {snippet}..."
+            )
+
+    rag.close()
+    return 0 if result.get("answer") else 1
+
+
 def _cmd_serve_mcp(_args: argparse.Namespace) -> int:
     # Imported lazily so `filings-analyst --help` works even if mcp isn't installed.
     from . import mcp_server
@@ -221,6 +283,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--k", type=int, default=6, help="Top-k chunks to retrieve (default 6)"
     )
     p_ask.set_defaults(func=_cmd_ask)
+
+    p_ask_corpus = sub.add_parser(
+        "ask-corpus",
+        help="Ask a question across every ingested filing (multi-filing RAG).",
+    )
+    p_ask_corpus.add_argument(
+        "question", help="Natural-language question in quotes"
+    )
+    p_ask_corpus.add_argument(
+        "--tickers",
+        type=str,
+        default="",
+        help="Comma-separated ticker filter (default: search all ingested filings).",
+    )
+    p_ask_corpus.add_argument(
+        "--accession-nos",
+        type=str,
+        default="",
+        dest="accession_nos",
+        help="Comma-separated accession-number filter (default: no filter).",
+    )
+    p_ask_corpus.add_argument(
+        "--k", type=int, default=8, help="Top-k chunks to retrieve (default 8)"
+    )
+    p_ask_corpus.set_defaults(func=_cmd_ask_corpus)
 
     p_serve = sub.add_parser("serve-mcp", help="Run the MCP server over stdio.")
     p_serve.set_defaults(func=_cmd_serve_mcp)
