@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filings-analyst-mcp"
+version = "0.1.0"
+description = "MCP server + RAG pipeline over SEC EDGAR filings, with a formal eval harness."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Dan Krawczun", email = "krawczun@gmail.com" },
+]
+keywords = ["mcp", "sec", "edgar", "rag", "10-k", "finance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "mcp>=1.0",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "sec-edgar-downloader>=5.0",
+]
+
+[project.optional-dependencies]
+embeddings = [
+    "sentence-transformers>=2.5",
+    "sqlite-vec>=0.1.0",
+    "numpy>=1.26",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "responses>=0.25",
+]
+
+[project.scripts]
+filings-analyst = "filings_analyst.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/CZtrader299/filings-analyst-mcp"
+Author = "https://krawczun.com"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
