@@ -1,0 +1,384 @@
+# Hand-curated golden set for the filings-analyst eval harness.
+#
+# Composition: 35 items across 5 tickers (AAPL, MSFT, JPM, BAC, XOM).
+#   - 15 easy   (3 per ticker) — facts plainly stated somewhere in the 10-K
+#   - 12 hard   (2-3 per ticker) — require synthesis / comparison / framing
+#   -  8 out-of-scope (1-2 per ticker) — answer NOT in a 10-K; correct
+#     behavior is refusal.
+#
+# Accession numbers correspond to filings already ingested in
+# ~/.filings_analyst_cache/<ticker>/10-K/<accession_no>/.
+#
+# DO NOT regenerate this file with an LLM. The whole point of a golden
+# set is to be authored by a human who knows what should be in a 10-K
+# but is independent of the system under test.
+
+# ====================================================================
+# AAPL — 0000320193-25-000079 (FY2025 10-K)
+# ====================================================================
+
+- id: aapl-001
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "What does Apple identify as risks related to its supply chain and reliance on outsourcing partners?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "Apple identifies concentration risk from a small number of outsourcing partners and component suppliers, the majority of which are located outside the United States (primarily in Asia). Disruption, capacity constraints, geopolitical tensions, natural disasters, or supplier financial difficulty could materially impact Apple's ability to manufacture and deliver products."
+  scope: in-scope
+  notes: "Core Risk Factors retrieval — supply-chain is one of Apple's most-discussed risks."
+
+- id: aapl-002
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "What does Apple identify as its primary product categories?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "Apple's primary product categories are iPhone, Mac, iPad, Wearables/Home/Accessories (including AirPods, Apple Watch, and Apple TV), and Services (including the App Store, advertising, AppleCare, cloud, digital content, and payment services)."
+  scope: in-scope
+  notes: "Basic Business-section retrieval."
+
+- id: aapl-003
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "What does Apple disclose about intellectual property risks?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "Apple discloses risks from third-party IP claims and litigation, including patent infringement suits that could result in injunctions, damages, or forced design-arounds. It also notes risks from inability to obtain licenses to third-party IP on reasonable terms, and risks of theft or unauthorized use of Apple's own IP."
+  scope: in-scope
+  notes: "Tests IP-specific Risk Factors retrieval."
+
+- id: aapl-004
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "How does Apple frame the dual nature of artificial intelligence — both as an opportunity and as a risk to its business?"
+  type: hard
+  expected_section: "Risk Factors"
+  reference_answer: "Apple discusses AI in the Risk Factors as a technology that the Company is increasingly building into its products and services, while also acknowledging that AI carries risks around accuracy, bias, intellectual-property exposure, regulatory uncertainty, competition from companies with greater AI investment, and reputational harm if AI features underperform or are misused."
+  scope: in-scope
+  notes: "Synthesis question — requires the model to pull together opportunity and risk framings."
+
+- id: aapl-005
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "How does Apple's discussion of regulatory and antitrust risk relate to its Services business?"
+  type: hard
+  expected_section: "Risk Factors"
+  reference_answer: "Apple's Risk Factors connect antitrust and regulatory pressure (including the EU Digital Markets Act and US litigation) directly to its Services business, since Services revenue depends heavily on the App Store distribution model, in-app payment terms, and default-app placement — exactly the practices regulators are challenging."
+  scope: in-scope
+  notes: "Tests synthesis across regulation and segment revenue."
+
+- id: aapl-006
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "What was the salary of Apple's Chief Executive Officer for fiscal year 2025?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — executive compensation disclosure lives in the DEF 14A proxy statement, not the 10-K, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "Compensation lives in the proxy, not the 10-K. System should refuse."
+
+- id: aapl-007
+  ticker: AAPL
+  accession_no: "0000320193-25-000079"
+  question: "What did Tim Cook announce at the WWDC 2024 keynote about Apple Intelligence?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — keynote announcements are press events, not 10-K disclosures, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "WWDC content is not a 10-K matter. System should refuse."
+
+# ====================================================================
+# MSFT — 0000950170-25-100235 (FY2025 10-K)
+# ====================================================================
+
+- id: msft-001
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "What does Microsoft describe as its operating segments?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "Microsoft reports three operating segments: Productivity and Business Processes (Office, Teams, LinkedIn, Dynamics), Intelligent Cloud (Azure and server products, enterprise services), and More Personal Computing (Windows, devices, gaming including Xbox and Activision Blizzard, search advertising)."
+  scope: in-scope
+  notes: "Foundational segment disclosure."
+
+- id: msft-002
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "What does Microsoft identify as risks associated with its cybersecurity posture?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "Microsoft discloses that as a major cloud and software provider it is a target of sophisticated cyberattacks (including nation-state actors), and that successful attacks could result in unauthorized access to customer data, service disruption, regulatory action, reputational harm, and significant remediation costs."
+  scope: in-scope
+  notes: "Microsoft has expanded cybersecurity Risk Factors disclosure significantly."
+
+- id: msft-003
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "How does Microsoft describe its strategy and investments in artificial intelligence?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "Microsoft describes a strategy of infusing AI across its product portfolio (Copilot in Office and Windows, Azure AI services including the OpenAI partnership) and making substantial capital expenditures on AI infrastructure (data centers, custom silicon, GPUs) to support both first-party and customer AI workloads."
+  scope: in-scope
+  notes: "AI strategy disclosure — central to MSFT's recent 10-Ks."
+
+- id: msft-004
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "How does Microsoft's framing of AI in the Business section differ from its framing of AI in the Risk Factors?"
+  type: hard
+  expected_section: "Risk Factors"
+  reference_answer: "In the Business section Microsoft frames AI as a strategic growth opportunity driving Azure consumption and Copilot adoption. In the Risk Factors Microsoft frames the same AI investments as cost, execution, regulatory, IP-litigation, and reputational risks — particularly around hallucination, bias, content provenance, and the scale of capex required to keep up with competitors."
+  scope: in-scope
+  notes: "Forces cross-section synthesis."
+
+- id: msft-005
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "What does Microsoft disclose about the relationship between its AI capex and its expected return on those investments?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "Microsoft discloses materially increased capital expenditures driven by AI and cloud infrastructure buildout, and notes that returns on these investments will be realized over multiple years; the MD&A acknowledges that demand visibility, depreciation pressure, and the rate of AI monetization create uncertainty about near-term operating margins."
+  scope: in-scope
+  notes: "MD&A-specific synthesis around capex and margin pressure."
+
+- id: msft-006
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "What was Microsoft's total dividends-paid amount in fiscal 2025?"
+  type: hard
+  expected_section: "Financial Statements"
+  reference_answer: "Microsoft reports its dividends paid in the Financial Statements / cash flow statement; the precise figure is found in the financing activities section of the consolidated statement of cash flows."
+  scope: in-scope
+  notes: "Tests retrieval into Financial Statements — exact-figure question."
+
+- id: msft-007
+  ticker: MSFT
+  accession_no: "0000950170-25-100235"
+  question: "Who did Microsoft announce as its new Chief Marketing Officer in 2026?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — leadership announcements after the 10-K's filing date are not in the filing, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "Post-filing announcement. System should refuse."
+
+# ====================================================================
+# JPM — 0001628280-26-008131 (most recent 10-K)
+# ====================================================================
+
+- id: jpm-001
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "What does JPMorgan Chase describe as its primary business segments?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "JPMorgan Chase reports four business segments: Consumer & Community Banking, Corporate & Investment Bank, Commercial Banking (or Commercial & Investment Bank in newer filings), and Asset & Wealth Management — plus a Corporate segment for treasury and other unallocated items."
+  scope: in-scope
+  notes: "Foundational segment disclosure."
+
+- id: jpm-002
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "What does JPMorgan disclose about credit risk in its 10-K?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "JPMorgan discloses credit risk as the risk of loss from a borrower or counterparty failing to meet obligations. It identifies concentrations in consumer lending (credit cards, mortgages, auto), commercial and corporate lending, and derivatives counterparties, and notes that allowance for credit losses (ACL) is estimated under CECL using forward-looking macroeconomic scenarios."
+  scope: in-scope
+  notes: "Core risk disclosure for any bank."
+
+- id: jpm-003
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "What regulatory capital requirements does JPMorgan describe itself as subject to?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "JPMorgan describes itself as subject to Basel III capital requirements as implemented by US bank regulators (Federal Reserve, OCC, FDIC), including CET1, Tier 1, and Total Capital ratios, the supplementary leverage ratio (SLR), the G-SIB capital surcharge, and the stress capital buffer (SCB) determined through CCAR/DFAST stress tests."
+  scope: in-scope
+  notes: "Tests retrieval of bank regulatory framework."
+
+- id: jpm-004
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "How does JPMorgan describe the interaction between higher interest rates and its net interest income, and what risks does it identify if rates fall?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "JPMorgan discusses that higher rates have lifted net interest income (NII) by widening the spread between asset yields and deposit costs, but notes that NII is sensitive to the trajectory of rates and the mix and pricing of deposits; if rates fall, asset yields reprice down while deposit betas can be slower to adjust, compressing NII."
+  scope: in-scope
+  notes: "Synthesis across rate environment and NII."
+
+- id: jpm-005
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "How does JPMorgan describe its approach to operational risk, including risks from artificial intelligence and third-party vendors?"
+  type: hard
+  expected_section: "Risk Factors"
+  reference_answer: "JPMorgan describes operational risk as encompassing technology failures, cybersecurity, fraud, third-party vendor concentration, and increasingly AI-related risks (model risk, data quality, regulatory compliance for AI use in lending and trading). It identifies third-party reliance — including cloud providers — as a growing source of concentration risk."
+  scope: in-scope
+  notes: "Combines operational risk, AI risk, and third-party risk."
+
+- id: jpm-006
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "How does JPMorgan describe the relationship between its investment-banking fee revenue and the underwriting and advisory deal environment?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "JPMorgan describes investment-banking fees as driven by underwriting (debt and equity capital markets) and advisory (M&A) activity, with revenue rising when issuance and deal volumes recover and falling in quieter capital-markets environments; the MD&A typically attributes year-over-year IB-fee moves to the broader deal-fee wallet."
+  scope: in-scope
+  notes: "Hard JPM question — segment-revenue driver synthesis."
+
+- id: jpm-007
+  ticker: JPM
+  accession_no: "0001628280-26-008131"
+  question: "What is the current price-to-book ratio of JPMorgan stock?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — current market multiples are not in a 10-K, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "Market data, not 10-K data. System should refuse."
+
+# ====================================================================
+# BAC — 0000070858-26-000157 (most recent 10-K)
+# ====================================================================
+
+- id: bac-001
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "What does Bank of America describe as its operating segments?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "Bank of America reports four operating segments: Consumer Banking, Global Wealth & Investment Management (which includes Merrill and Bank of America Private Bank), Global Banking, and Global Markets, plus an All Other category for residual activity."
+  scope: in-scope
+  notes: "Foundational segment disclosure."
+
+- id: bac-002
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "What does Bank of America disclose about its exposure to interest rate risk?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "Bank of America discloses that it is exposed to interest rate risk through its asset-sensitive balance sheet — net interest income rises when rates rise and falls when rates fall — and that unrealized losses on available-for-sale (AFS) and held-to-maturity (HTM) securities portfolios are sensitive to long-end rate moves."
+  scope: in-scope
+  notes: "Standard bank IR risk disclosure."
+
+- id: bac-003
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "What does Bank of America identify as risks related to deposit competition and deposit retention?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "Bank of America identifies that deposit costs and retention are sensitive to competition from money-market funds, fintech, and direct banks; that rising rates can accelerate deposit migration from non-interest-bearing to interest-bearing accounts; and that loss of deposits would force more expensive wholesale funding."
+  scope: in-scope
+  notes: "Deposit-flight risk is a major post-2023 banking-crisis disclosure."
+
+- id: bac-004
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "How does Bank of America describe the interplay between its allowance for credit losses (ACL) and the CECL accounting standard's reliance on forward-looking macroeconomic scenarios?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "Bank of America describes that under CECL its ACL is estimated using forward-looking macroeconomic scenarios (unemployment, GDP, home prices, commercial real estate values) and that the resulting ACL is sensitive to scenario weights — meaning that even unchanged credit performance can produce reserve build or release as the macro outlook shifts."
+  scope: in-scope
+  notes: "Synthesis between accounting policy and macro sensitivity."
+
+- id: bac-005
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "How does Bank of America frame its commercial real estate (CRE) exposure, including office?"
+  type: hard
+  expected_section: "Risk Factors"
+  reference_answer: "Bank of America frames CRE — and particularly office — as an area of elevated risk given post-pandemic occupancy declines, refinancing pressure at higher rates, and valuation declines. It typically discloses CRE-portfolio composition by property type and notes proactive monitoring and reserve coverage of the office sub-portfolio."
+  scope: in-scope
+  notes: "CRE office is a heavily-disclosed banking risk."
+
+- id: bac-006
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "How does Bank of America link its capital return policy (dividends and share repurchases) to its regulatory capital requirements?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "Bank of America frames capital return as occurring on top of its regulatory capital requirements (CET1 minimum plus the stress capital buffer and the G-SIB surcharge); dividends and buybacks are sized to maintain a target CET1 ratio above those requirements while also meeting internal management buffers."
+  scope: in-scope
+  notes: "Hard BAC question — capital-return + regulatory-capital synthesis."
+
+- id: bac-007
+  ticker: BAC
+  accession_no: "0000070858-26-000157"
+  question: "What dividend will Bank of America pay next quarter?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — forward dividend declarations are press-release / 8-K items, not 10-K disclosures, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "Future dividend declarations live in 8-Ks. System should refuse."
+
+# ====================================================================
+# XOM — 0000034088-26-000045 (most recent 10-K)
+# ====================================================================
+
+- id: xom-001
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "What does ExxonMobil describe as its primary business segments?"
+  type: easy
+  expected_section: "Business"
+  reference_answer: "ExxonMobil reports three primary segments: Upstream (exploration and production of crude oil and natural gas), Energy Products (downstream — refining and fuels marketing), Chemical Products, and Specialty Products. Some filings combine downstream into a single segment."
+  scope: in-scope
+  notes: "Foundational segment disclosure for an oil major."
+
+- id: xom-002
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "What does ExxonMobil disclose about climate change and energy transition risks?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "ExxonMobil discloses risks from climate-related regulation (carbon pricing, methane rules, fuel-economy standards), shifts in consumer and policymaker preferences toward lower-carbon energy, potential stranded-asset risk for long-dated hydrocarbon projects, and litigation risk from climate-related lawsuits."
+  scope: in-scope
+  notes: "Central oil-major Risk Factor."
+
+- id: xom-003
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "What commodity-price risk does ExxonMobil identify as material to its earnings?"
+  type: easy
+  expected_section: "Risk Factors"
+  reference_answer: "ExxonMobil identifies that crude oil, natural gas, refined product, and petrochemical prices are volatile and outside its control, and that earnings, cash flow, and capital allocation are highly sensitive to those prices. It also notes regional price differentials (e.g., Brent vs WTI, Henry Hub vs international LNG) as material drivers."
+  scope: in-scope
+  notes: "Commodity-price exposure is the binding constraint on XOM earnings."
+
+- id: xom-004
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "How does ExxonMobil's capital-allocation discussion balance investment in traditional oil and gas projects with investment in lower-carbon initiatives like carbon capture and lithium?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "ExxonMobil's MD&A discusses a capital-allocation framework that funds attractive-return oil-and-gas projects (particularly Guyana, Permian, and LNG) while also funding Low Carbon Solutions investments — carbon capture and storage, hydrogen, biofuels, and lithium for batteries — with the latter framed as a smaller share of capex but with longer-dated optionality."
+  scope: in-scope
+  notes: "Capital-allocation synthesis across traditional and low-carbon."
+
+- id: xom-005
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "How does ExxonMobil describe the strategic rationale and financial impact of its acquisition of Pioneer Natural Resources?"
+  type: hard
+  expected_section: "MD&A"
+  reference_answer: "ExxonMobil describes the Pioneer acquisition as combining Pioneer's Permian Basin position with ExxonMobil's technology and development capabilities to lower per-barrel cost and accelerate emissions reductions. It discusses purchase accounting, goodwill, integration progress, and the impact on Upstream segment volumes and reserves."
+  scope: in-scope
+  notes: "Major recent M&A — should be discussed in MD&A and Business."
+
+- id: xom-006
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "What was the spot price of WTI crude oil this morning?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — real-time commodity prices are not in a 10-K, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "Real-time market data. System should refuse."
+
+- id: xom-007
+  ticker: XOM
+  accession_no: "0000034088-26-000045"
+  question: "When is ExxonMobil's next earnings call scheduled?"
+  type: out-of-scope
+  expected_section: null
+  reference_answer: "This question is out of scope — earnings call schedules are press-release / IR-website information, not 10-K disclosures, so the answer is not in the provided filings."
+  scope: out-of-scope
+  notes: "IR calendar info, not in 10-K. System should refuse."

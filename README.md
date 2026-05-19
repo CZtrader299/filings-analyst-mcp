@@ -4,7 +4,7 @@ An MCP server for querying SEC EDGAR filings. Built for AI agents and humans.
 
 ## Status
 
-Active development — currently **week 3 of 4 — corpus-wide retrieval working across multiple filings.** The RAG pipeline runs end-to-end against both single filings (`ask_filing`) and the entire ingested corpus (`ask_corpus`). The starter corpus spans AAPL, MSFT, JPM, BAC, and XOM. A formal evaluation harness lands in week 4.
+**Build complete (weeks 1-4 shipped).** The RAG pipeline runs end-to-end against both single filings (`ask_filing`) and the entire ingested corpus (`ask_corpus`). The starter corpus spans AAPL, MSFT, JPM, BAC, and XOM. The formal evaluation harness in week 4 produced real, auditable metrics against a hand-curated 35-question golden set — numbers are in the Evaluation section below.
 
 ## Why this exists
 
@@ -38,7 +38,7 @@ src/filings_analyst/
 
 - Week 2 (done) — chunking + embeddings + sqlite-vec + `ask_filing` tool (single-document RAG).
 - Week 3 (done) — `ask_corpus` tool for multi-filing retrieval across the starter universe (AAPL/MSFT/JPM/BAC/XOM); MD&A section extraction hardened for real-world heading variants (Apple-style curly apostrophes and non-breaking spaces, Microsoft-style cross-line splits); honest provider comparison documented below.
-- Week 4 — ragas eval harness + hand-curated golden set + metrics published in this README.
+- Week 4 (done) — formal eval harness with hand-curated 35-question golden set, five metrics (faithfulness / answer_relevancy / context_precision / context_recall + a hand-rolled refusal_correctness), markdown report writer with worst-3-per-metric, and a manual-trigger GitHub Actions workflow. Real numbers from a stratified 10-item sample run published below.
 
 ## Quick start
 
@@ -52,6 +52,10 @@ filings-analyst ask <accession_no> AAPL "What did management say about AI in thi
 # Or ingest the full starter corpus and ask a cross-filing question:
 filings-analyst ingest --tickers AAPL,MSFT,JPM,BAC,XOM
 filings-analyst ask-corpus "Which of these companies discusses AI risks most prominently in their 10-K filings?"
+
+# Reproduce the evaluation harness numbers:
+python scripts/run_sample_eval.py    # 10-item stratified sample, ~10 min
+filings-analyst eval                  # full 35-item run, ~67 min
 ```
 
 The first `ingest` run downloads the most recent AAPL 10-K from SEC EDGAR, extracts its named sections, chunks them, and embeds the chunks locally with `all-MiniLM-L6-v2` (~80MB; downloaded once into the user-level Hugging Face cache, not into this repo). Subsequent runs reuse both caches.
@@ -81,7 +85,61 @@ Question: **"What did Apple say about AI risks in its most recent 10-K?"** Same 
 
 Methodology: same retrieval (k=6) for all three rows. Claude via `claude -p` on a Max 5x subscription (Agent SDK credit activates 2026-06-15; until then the call goes against the standard subscription quota). OpenAI via `gpt-4o-mini` at temperature 0 would compute actual token cost; this dev box has no `OPENAI_API_KEY` set, so that row is honestly blank rather than fabricated. Regex baseline returns the retrieved chunks verbatim with no synthesis at all (a `Here are the most relevant excerpts:` header + bullet list).
 
-What the comparison shows, honestly: on this question, Claude correctly refuses to answer ("the provided excerpts do not contain that information") because the top-6 retrieved chunks from local MiniLM embeddings don't actually contain Apple's AI-specific risk language — the most-similar Risk Factors chunks were about competition and IP licensing, not AI per se. The regex baseline is faster and free but offloads all the reading to the human. This is a useful real-world finding: at k=6 with MiniLM-L6-v2 embeddings, retrieval quality is the binding constraint, not the LLM. The week-4 eval harness will quantify that on a golden set rather than leaving it as a single-question anecdote.
+What the comparison shows, honestly: on this question, Claude correctly refuses to answer ("the provided excerpts do not contain that information") because the top-6 retrieved chunks from local MiniLM embeddings don't actually contain Apple's AI-specific risk language — the most-similar Risk Factors chunks were about competition and IP licensing, not AI per se. The regex baseline is faster and free but offloads all the reading to the human. This is a useful real-world finding: at k=6 with MiniLM-L6-v2 embeddings, retrieval quality is the binding constraint, not the LLM. The week-4 eval harness quantifies exactly that on a golden set, below.
+
+## Evaluation
+
+The repo ships with a 35-item hand-curated golden set spanning all five tickers (AAPL, MSFT, JPM, BAC, XOM) and three question types — 15 easy facts plainly stated in the 10-K, 12 hard synthesis questions, 8 deliberately out-of-scope questions whose correct behavior is refusal (e.g. exec compensation, which lives in the proxy not the 10-K). Each item is graded on five metrics via Claude (`claude -p`):
+
+- **faithfulness** — every claim in the answer is supported by the retrieved chunks (catches hallucination).
+- **answer_relevancy** — the answer actually addresses the question asked.
+- **context_precision** — the retrieved chunks are relevant to the question.
+- **context_recall** — the relevant content in the filing was actually retrieved.
+- **refusal_correctness** — out-of-scope questions are refused, in-scope questions are answered with citations.
+
+The numbers below are from a **stratified 10-item sample** of the full set covering all five tickers and all three question types. A full 35-item run takes ~67 minutes wall-clock because each item invokes the RAG pipeline plus five separate LLM-graded metrics — too long for a single CI step. To reproduce this sample, or to run the full set, the harness is in the box:
+
+```
+python scripts/run_sample_eval.py     # the 10-item stratified sample (~10 min)
+filings-analyst eval                   # the full 35-item run (~67 min)
+filings-analyst eval --sample 5        # ad-hoc N-item subset
+```
+
+### Aggregate metrics (10-item stratified sample)
+
+| Metric | Score |
+|--------|-------|
+| faithfulness | 0.992 |
+| answer_relevancy | 0.957 |
+| context_precision | 0.650 |
+| context_recall | 0.500 |
+| refusal_correctness | 1.000 |
+
+### Per-type breakdown
+
+| Type | n | Mean score | Notes |
+|------|---|------------|-------|
+| easy | 4 | 0.808 | Straightforward retrieval. Faithfulness and refusal_correctness perfect; context_recall is the drag (0.500) — see below. |
+| hard | 3 | 0.656 | Synthesis questions stress retrieval the most. context_recall on this slice is 0.000 — the system is answering well from partial context, but isn't pulling every supporting fact. |
+| out-of-scope | 3 | 1.000 | Conservative-flagging works. Every out-of-scope question (exec comp, market data, real-time price) was correctly refused. |
+
+### Per-ticker breakdown
+
+| Ticker | n | Mean | Comment |
+|--------|---|------|---------|
+| AAPL | 3 | 0.845 | Tech-style 10-K parses cleanly; section extraction is reliable. |
+| MSFT | 2 | 0.685 | Synthesis question on AI framing was a stress test; context_precision came in at 0.17 (1/6 chunks relevant). |
+| JPM | 3 | 0.801 | Bank-style filings parse, but context_recall is uneven (0.333). |
+| BAC | 1 | 0.890 | Single easy question, clean retrieval. |
+| XOM | 1 | 1.000 | Single out-of-scope question, correctly refused. |
+
+### Honest reflection on the numbers
+
+The interesting result is the spread between **faithfulness (0.992)** and **context_recall (0.500)**. The system does not hallucinate — when it answers, it sticks to what was retrieved. But the retrieval itself is noisy: roughly half the time, a relevant chunk *that exists in the filing* doesn't make the top-k, especially on hard synthesis questions where the relevant material is scattered across sections. **Retrieval is the binding constraint, not the LLM.** The most direct fix is swapping the local `all-MiniLM-L6-v2` embeddings (384-dim, free) for OpenAI's `text-embedding-3-small` (1536-dim, ~$0.02/Mtok, ~$2-5 one-time for the full corpus) — that's a one-line config change via `EMBEDDING_PROVIDER=openai`, and the eval harness is set up to measure the uplift directly.
+
+**refusal_correctness at 1.000** is the result this project was specifically designed for, and it works. Every out-of-scope question (exec comp, market data, real-time spot price) was refused with the canonical "the provided excerpts do not contain that information" language rather than a fabricated answer. This is the same conservative-flagging discipline from the LSE Buyback Scraper — escalate rather than guess — and it transfers cleanly to a RAG context.
+
+The full per-item report with worst-3-per-metric and individual citation chains is committed at [`eval_reports/2026-05-19_sample_eval.md`](eval_reports/2026-05-19_sample_eval.md). The grading and the verdict are not opinion — every score is reproducible by re-running the script.
 
 ## Connecting to Claude Desktop / Cursor
 

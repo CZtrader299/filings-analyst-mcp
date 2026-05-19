@@ -1,0 +1,66 @@
+name: eval
+
+# Manual-trigger only for now. Reason: the eval needs an ingested
+# filings cache (~/.filings_analyst_cache/) which we don't ship in the
+# repo (filings are downloaded from SEC EDGAR per their fair-access
+# policy, not bundled). Until that's solved, this workflow exists to
+# demonstrate the infrastructure exists; it doesn't actually re-grade.
+#
+# After 2026-06-15 when Dan's $100/month Agent SDK credit activates,
+# we can flip this to: (a) run `filings-analyst ingest` against a
+# fixed set of tickers as a setup step, (b) run the eval against the
+# freshly-ingested cache, and (c) upload the resulting markdown report
+# as an artifact (and post the aggregate-metrics table as a PR
+# comment).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[embeddings,dev]"
+          # ragas pull is best-effort; metrics gracefully fall back if absent.
+          pip install ragas || echo "ragas install failed - metrics will use built-in graders"
+
+      - name: Verify eval module imports
+        run: |
+          python -c "from filings_analyst.eval import EvalRunner; print('eval module OK')"
+
+      - name: Run unit tests
+        run: pytest tests/ -q
+
+      # ---------------------------------------------------------------
+      # The actual eval is skipped in CI today — see workflow header
+      # comment. Uncomment and parameterize once the Agent SDK credit
+      # activates and a cached corpus can be reconstructed in CI.
+      # ---------------------------------------------------------------
+      # - name: Ingest starter corpus
+      #   env:
+      #     FILINGS_ANALYST_USER_AGENT: ${{ secrets.FILINGS_ANALYST_USER_AGENT }}
+      #   run: |
+      #     filings-analyst ingest --tickers AAPL,MSFT,JPM,BAC,XOM
+      #
+      # - name: Run eval
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #   run: |
+      #     filings-analyst eval --output eval_reports/ci_eval.md
+      #
+      # - name: Upload eval report
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: eval-report
+      #     path: eval_reports/ci_eval.md

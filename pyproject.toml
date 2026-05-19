@@ -28,6 +28,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "sec-edgar-downloader>=5.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +52,9 @@ Author = "https://krawczun.com"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"filings_analyst.eval" = ["golden_set.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

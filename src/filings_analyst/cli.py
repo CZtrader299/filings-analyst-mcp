@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 import textwrap
+from pathlib import Path
 from typing import Sequence
 
 from . import config, edgar, sections
@@ -219,6 +220,70 @@ def _cmd_ask_corpus(args: argparse.Namespace) -> int:
     return 0 if result.get("answer") else 1
 
 
+def _cmd_eval(args: argparse.Namespace) -> int:
+    try:
+        from .eval.runner import EvalRunner
+        from .eval.report import write_full_report
+    except ImportError as exc:
+        print(f"Error: eval dependencies not installed: {exc}", file=sys.stderr)
+        print('Hint: run `pip install -e ".[embeddings,dev]" pyyaml`.', file=sys.stderr)
+        return 2
+
+    only_types: set[str] | None = None
+    if args.only_types:
+        only_types = {
+            t.strip() for t in args.only_types.split(",") if t.strip()
+        }
+
+    runner = EvalRunner()
+    try:
+        golden = runner.load_golden_set()
+    except ImportError as exc:
+        print(f"Error loading golden set: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Loaded {len(golden)} golden items.")
+    if args.sample:
+        print(f"--sample {args.sample}: will run only the first {args.sample}.")
+    if only_types:
+        print(f"--only-types: restricting to {sorted(only_types)}.")
+    if args.no_cache:
+        print("--no-cache: will re-grade every item from scratch.")
+    print()
+
+    result = runner.run(
+        golden,
+        sample=args.sample,
+        only_types=only_types,
+        skip_cached=not args.no_cache,
+    )
+
+    print()
+    print("=== Aggregate metrics ===")
+    for name, score in result.aggregate_metrics.items():
+        print(f"  {name:24s} {score:.3f}")
+    print()
+    print(f"Provider: {result.provider}")
+    print(f"Items run: {result.n_run} / {result.n_total}")
+    print(f"Duration: {result.duration_s:.1f}s")
+    print()
+
+    print("=== Per-type breakdown ===")
+    for tname, b in sorted(result.per_type_breakdown().items()):
+        print(f"  {tname:14s} n={b['n']:<3d} mean={b['mean_score']:.3f}")
+    print()
+
+    print("=== Per-ticker breakdown ===")
+    for t, b in sorted(result.per_ticker_breakdown().items()):
+        print(f"  {t:6s} n={b['n']:<3d} mean={b['mean_score']:.3f}")
+    print()
+
+    output = Path(args.output) if args.output else (config.CACHE_DIR / "eval_report.md")
+    write_full_report(result, output)
+    print(f"Full markdown report written to: {output}")
+    return 0
+
+
 def _cmd_serve_mcp(_args: argparse.Namespace) -> int:
     # Imported lazily so `filings-analyst --help` works even if mcp isn't installed.
     from . import mcp_server
@@ -308,6 +373,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "--k", type=int, default=8, help="Top-k chunks to retrieve (default 8)"
     )
     p_ask_corpus.set_defaults(func=_cmd_ask_corpus)
+
+    p_eval = sub.add_parser(
+        "eval",
+        help="Run the formal eval harness against the hand-curated golden set.",
+    )
+    p_eval.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Run only the first N items (smoke test).",
+    )
+    p_eval.add_argument(
+        "--only-types",
+        type=str,
+        default="",
+        dest="only_types",
+        help="Comma-separated subset of types to run (easy, hard, out-of-scope).",
+    )
+    p_eval.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Ignore the on-disk eval cache and re-grade every item.",
+    )
+    p_eval.add_argument(
+        "--output",
+        type=str,
+        default="",
+        help="Path to write the markdown report (default: <cache>/eval_report.md).",
+    )
+    p_eval.set_defaults(func=_cmd_eval)
 
     p_serve = sub.add_parser("serve-mcp", help="Run the MCP server over stdio.")
     p_serve.set_defaults(func=_cmd_serve_mcp)

@@ -20,6 +20,9 @@ filings_cache/
 *.sqlite
 *.db
 
+# Eval run logs (transient; the committed report under eval_reports/ is the artifact)
+eval_run*.log
+
 # Environment
 .env
 .env.local
