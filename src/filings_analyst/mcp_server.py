@@ -1,12 +1,13 @@
-"""MCP server exposing deterministic 10-K query tools over stdio.
+"""MCP server exposing 10-K query tools over stdio.
 
-Three tools this pass (all deterministic — no LLM yet):
+Four tools today:
 
 * ``search_filings`` — list available filings for a ticker.
 * ``get_filing`` — return metadata + preview of a filing's full text.
 * ``extract_section`` — return a named section from a filing.
+* ``ask_filing`` — RAG-backed Q&A over a single ingested filing.
 
-Future weeks add ``ask_filing`` and ``ask_corpus`` (RAG-backed).
+Multi-filing retrieval (``ask_corpus``) lands in week 3.
 
 Run with::
 
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, Optional
 
 from . import edgar, sections
 
@@ -127,6 +128,57 @@ def tool_extract_section(
     return out
 
 
+def tool_ask_filing(
+    accession_no: str,
+    ticker: str,
+    question: str,
+    k: int = 6,
+    rag: Optional[Any] = None,
+) -> dict[str, Any]:
+    """RAG-backed Q&A over a single ingested filing.
+
+    The ``rag`` arg is for test injection; production callers leave it
+    None so a fresh ``FilingRAG`` is constructed per call.
+    """
+    if rag is None:
+        # Local import: keeps mcp_server importable even when the
+        # embeddings extras aren't installed (tests for the deterministic
+        # tools should still pass on a minimal env).
+        from .rag import FilingRAG
+
+        try:
+            rag = FilingRAG()
+        except ImportError as exc:
+            return {
+                "accession_no": accession_no,
+                "ticker": ticker.upper(),
+                "question": question,
+                "error": (
+                    f"RAG dependencies not installed: {exc}. "
+                    'Run `pip install -e ".[embeddings]"`.'
+                ),
+            }
+
+    try:
+        result = rag.ask_filing(
+            question,
+            accession_no=accession_no,
+            ticker=ticker,
+            k=k,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "accession_no": accession_no,
+            "ticker": ticker.upper(),
+            "question": question,
+            "error": f"ask_filing failed: {exc}",
+        }
+    # Inject identifying fields so MCP clients always see them.
+    result.setdefault("accession_no", accession_no)
+    result.setdefault("ticker", ticker.upper())
+    return result
+
+
 # --- MCP server wiring -------------------------------------------------------
 
 
@@ -177,6 +229,26 @@ def _build_server():
                 },
             ),
             Tool(
+                name="ask_filing",
+                description=(
+                    "Answer a natural-language question about a single 10-K "
+                    "filing using RAG over its sections. Filing must already "
+                    "be ingested into the vector store via "
+                    "`filings-analyst ingest`. Returns the answer plus the "
+                    "cited chunks used to ground it."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "accession_no": {"type": "string"},
+                        "ticker": {"type": "string"},
+                        "question": {"type": "string"},
+                        "k": {"type": "integer", "default": 6},
+                    },
+                    "required": ["accession_no", "ticker", "question"],
+                },
+            ),
+            Tool(
                 name="extract_section",
                 description=(
                     "Return one named section from a cached 10-K. "
@@ -216,6 +288,13 @@ def _build_server():
                 accession_no=arguments["accession_no"],
                 ticker=arguments["ticker"],
                 section=arguments["section"],
+            )
+        elif name == "ask_filing":
+            result = tool_ask_filing(
+                accession_no=arguments["accession_no"],
+                ticker=arguments["ticker"],
+                question=arguments["question"],
+                k=arguments.get("k", 6),
             )
         else:
             result = {"error": f"Unknown tool: {name}"}

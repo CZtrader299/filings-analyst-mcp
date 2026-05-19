@@ -105,3 +105,40 @@ def test_build_server_registers_three_tools():
     pytest.importorskip("mcp")
     server = mcp_server._build_server()
     assert server is not None
+
+
+def test_tool_ask_filing_delegates_to_rag():
+    """The MCP ask_filing handler should pass args through and return the dict."""
+    fake_rag = MagicMock()
+    fake_rag.ask_filing.return_value = {
+        "question": "Q?",
+        "answer": "A.",
+        "cited_chunks": [],
+        "provider": "anthropic_api",
+    }
+    out = mcp_server.tool_ask_filing(
+        accession_no="0000320193-24-000123",
+        ticker="AAPL",
+        question="Q?",
+        k=4,
+        rag=fake_rag,
+    )
+    fake_rag.ask_filing.assert_called_once_with(
+        "Q?", accession_no="0000320193-24-000123", ticker="AAPL", k=4
+    )
+    assert out["answer"] == "A."
+    assert out["accession_no"] == "0000320193-24-000123"
+    assert out["ticker"] == "AAPL"
+
+
+def test_tool_ask_filing_handles_exception():
+    fake_rag = MagicMock()
+    fake_rag.ask_filing.side_effect = RuntimeError("boom")
+    out = mcp_server.tool_ask_filing(
+        accession_no="A-1",
+        ticker="AAPL",
+        question="Q?",
+        rag=fake_rag,
+    )
+    assert "error" in out
+    assert "boom" in out["error"]
