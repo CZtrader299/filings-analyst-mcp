@@ -147,6 +147,44 @@ Where MSFT lands lowest (0.710) is consistent with the MSFT synthesis questions 
 
 The full per-item report with worst-3-per-metric and individual citation chains is committed at [`eval_reports/2026-05-19_full_eval.md`](eval_reports/2026-05-19_full_eval.md). Every score is reproducible by re-running `filings-analyst eval`.
 
+### Iteration: a section-extraction fix that didn't move the eval
+
+The baseline showed three of five tickers extracting essentially no MD&A text (JPM 567 chars, BAC 929 chars, XOM 627 chars vs. AAPL 20,766 and MSFT 50,059), so the obvious-looking intervention was to fix the section extractor. Inspection of the raw HTML found three distinct real patterns the original regex missed:
+
+- **JPM**'s Item 7 anchor is a forward-reference placeholder pointing to a separately-titled "Management's Discussion and Analysis" section much later in the document.
+- **BAC**'s `Item 7.` text is a chapter-divider banner near the end of the file; the real content is earlier.
+- **XOM**'s Item 7 string repeats throughout the document inside TOC anchor links; the original "last match" heuristic landed on a TOC entry rather than the section.
+
+The fix adds a section-title fallback with a prose-density heuristic to skip TOC anchors (see [`src/filings_analyst/sections.py`](src/filings_analyst/sections.py)). Mechanical effect: MD&A character counts went from ~500-1000 to ~120K-400K on the affected filings, and embedded chunk counts went from ~1 to 70-234. Three new unit-test fixtures cover each failure mode. AAPL and MSFT extraction was unaffected (verified by character count and chunk count regression).
+
+Then I re-ran the full 35-item eval on the new chunks. The result was not what I expected:
+
+| Metric | Before fix | After fix | Δ |
+|--------|-----------:|----------:|------:|
+| faithfulness | 0.998 | 0.971 | −0.027 |
+| answer_relevancy | 0.894 | 0.820 | −0.074 |
+| context_precision | 0.514 | 0.524 | +0.010 |
+| context_recall | 0.443 | 0.429 | −0.014 |
+| refusal_correctness | 0.886 | 0.714 | −0.172 |
+
+Per-ticker context_recall (the metric the fix targeted):
+
+| Ticker | Before | After | Δ |
+|--------|-------:|------:|------:|
+| AAPL | 0.643 | 0.643 | 0.000 |
+| MSFT | 0.286 | 0.286 | 0.000 |
+| BAC | 0.357 | 0.500 | **+0.143** |
+| JPM | 0.500 | 0.357 | **−0.143** |
+| XOM | 0.429 | 0.357 | **−0.072** |
+
+The eval surfaced a real tradeoff the intuition didn't see: **more content competing for top-k slots doesn't help recall when the embeddings can't distinguish the relevant chunk from adjacent ones.** JPM's MD&A inflated from 1 chunk to 234 chunks, and the local MiniLM embedding model started returning similar-looking-but-wrong chunks more confidently, displacing chunks from other sections that the original (sparse) JPM corpus had been pulling. BAC happened to benefit; JPM and XOM regressed; aggregate is flat.
+
+The refusal_correctness drop (−0.172) is the more material effect: with more financial-MD&A content available, the system is now sometimes *attempting* to answer out-of-scope-but-financially-adjacent questions like "current P/B ratio" by weaving citations from the now-rich MD&A — rather than refusing as it did before.
+
+**What this proves about the project.** The eval harness is doing its job. It's catching a real tradeoff that intuition would miss, and it's preventing a "looks-like-a-fix" change from quietly degrading user-facing behavior. The right next step is not more content but better-quality retrieval — i.e. the OpenAI embedding swap the prior reflection already flagged. The section-extraction fix is still shipped because the underlying parsing improvement is correct (the chunks really are valid MD&A content now, and the prior state of "1 chunk of MD&A" was a known bug); the lesson is that retrieval quality is what gates everything downstream.
+
+The post-fix per-item report is at [`eval_reports/2026-05-20_post_fix_eval.md`](eval_reports/2026-05-20_post_fix_eval.md); the original baseline remains at [`eval_reports/2026-05-19_full_eval.md`](eval_reports/2026-05-19_full_eval.md) for direct comparison.
+
 ## Connecting to Claude Desktop / Cursor
 
 Register the server in your MCP client config. For Claude Desktop, add this to `claude_desktop_config.json`:

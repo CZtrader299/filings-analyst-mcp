@@ -275,6 +275,148 @@ def _find_section_starts(lines: list[str]) -> list[tuple[int, str]]:
     return hits
 
 
+# Minimum reasonable MD&A length in cleaned characters. Real MD&A
+# sections in 10-Ks are tens of thousands of characters; anything below
+# this threshold is almost certainly the Item-anchor catching a
+# forward-reference placeholder, a chapter-divider banner, or a TOC
+# entry rather than the real section. Picked to leave Apple/Microsoft
+# (both well above 20K) untouched while triggering on JPM/BAC/XOM
+# (all under 1K with the Item-anchor strategy alone).
+_MDA_MIN_REASONABLE_CHARS = 3000
+
+# Title-only MD&A pattern used by the section-title fallback. Matches
+# both ALL-CAPS and Title-Case variants, with or without an "ITEM 7."
+# prefix, and tolerates the curly-apostrophe and non-breaking-space
+# variants real filers emit (those get normalized to ASCII before
+# matching, so a plain "'" is enough here). Anchored to the start of
+# a line so we only match heading-like text, not in-prose mentions
+# like "see the Management's Discussion and Analysis section".
+_MDA_TITLE_FALLBACK = re.compile(
+    r"^\s*(?:ITEM\s*7\.?\s*)?MANAGEMENT'?S?\s+DISCUSSION\s+AND\s+ANALYSIS\b",
+    re.IGNORECASE,
+)
+
+# Markers for the END of an MD&A section in the fallback path. Item 7A
+# (quantitative/qualitative disclosures) or Item 8 (financial
+# statements) typically follow MD&A. The standalone title variant
+# catches filers that drop the "Item 7A." label.
+_MDA_END_MARKERS = [
+    re.compile(r"^\s*ITEM\s*7A\b", re.IGNORECASE),
+    re.compile(r"^\s*ITEM\s*8\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*QUANTITATIVE\s+AND\s+QUALITATIVE\s+DISCLOSURES\b",
+        re.IGNORECASE,
+    ),
+    # JPM-style: the financial-statements block opens with the
+    # auditor's report rather than an Item 8 anchor (Item 8 only
+    # appears earlier as a forward-reference). These are reliable
+    # boundary markers for the start of the financial-statements
+    # block in bank filings.
+    re.compile(
+        r"^\s*REPORT\s+OF\s+INDEPENDENT\s+REGISTERED\s+PUBLIC\s+ACCOUNTING\s+FIRM\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*MANAGEMENT'?S?\s+REPORT\s+ON\s+INTERNAL\s+CONTROL\b",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _mda_density_score(lines: list[str], start: int, window: int = 30) -> int:
+    """Count alphabetic characters in the next ``window`` non-empty lines.
+
+    Used by the section-title fallback to distinguish a real MD&A body
+    start (followed by paragraphs of prose) from a TOC entry, a
+    chapter-divider banner, or a page-header repeat (followed by
+    page numbers, navigation links, or another heading).
+    """
+    collected: list[str] = []
+    i = start + 1
+    while i < len(lines) and len(collected) < window:
+        if lines[i]:
+            collected.append(_normalize_heading_line(lines[i]))
+        i += 1
+    joined = " ".join(collected)
+    return sum(1 for c in joined if c.isalpha())
+
+
+def _find_mda_fallback_start(
+    lines: list[str],
+    current_start: int,
+) -> list[int] | None:
+    """Find candidate MD&A starts by searching for the section title directly.
+
+    Used only when the Item-anchor extraction produced a suspiciously
+    short MD&A slice. Three real failure modes motivate this:
+
+    * **JPM**: ``Item 7.`` is a forward-reference placeholder ("MD&A
+      appears on pages 46-160. Such information should be read in
+      conjunction with...") immediately followed by ``Item 7A.``. The
+      actual MD&A content sits under a separately-titled
+      ``Management's discussion and analysis`` heading elsewhere.
+    * **BAC**: the ``Item 7.`` line is a chapter-divider banner near
+      the end of the document; the real content is earlier under a
+      ``Management's Discussion and Analysis...`` title.
+    * **XOM**: the ``Item 7.`` line *is* the real one (a forward
+      reference to the Financial Section), but the actual MD&A body
+      that follows is interspersed with repeated page-header lines
+      ("MANAGEMENT'S DISCUSSION AND ANALYSIS..."). The Item-anchor
+      slice ended too early because Item 7A also appears in the cover
+      forward-reference. Picking the title fallback with high prose
+      density downstream lands us in the real body.
+
+    Heuristic: scan every line matching :data:`_MDA_TITLE_FALLBACK`,
+    skip lines that are clearly Item-anchor variants of the *current*
+    too-short slice, and return every candidate whose next 30 non-
+    empty lines contain enough alphabetic prose to be a real section
+    body (>= 1500 alpha chars is a generous floor — TOC and page-
+    header entries score well below this in practice). The caller
+    walks the list in order and accepts the first candidate that
+    produces a long-enough body; this two-step accept lets us skip
+    short forward-reference paragraphs (JPM) that look like real
+    section bodies up until the trailing Item 7A end-marker fires.
+
+    Returns the candidate line indices in document order, or ``None``
+    if no line clears the prose-density floor.
+    """
+    PROSE_FLOOR = 1500
+    candidates: list[int] = []
+    for idx, raw_line in enumerate(lines):
+        if not raw_line:
+            continue
+        line = _normalize_heading_line(raw_line)
+        if not _MDA_TITLE_FALLBACK.search(line):
+            continue
+        # Don't re-pick the same Item-anchor line that already failed.
+        if idx == current_start:
+            continue
+        score = _mda_density_score(lines, idx)
+        if score < PROSE_FLOOR:
+            continue
+        candidates.append(idx)
+    return candidates if candidates else None  # type: ignore[return-value]
+
+
+def _find_mda_fallback_end(lines: list[str], start: int) -> int:
+    """Locate the end of the MD&A section under the fallback path.
+
+    Returns the index of the first end-marker line at or after
+    ``start + 1``, or ``len(lines)`` if no marker is found. End markers
+    are Item 7A, Item 8, or a standalone "Quantitative and Qualitative
+    Disclosures" heading.
+    """
+    for idx in range(start + 1, len(lines)):
+        raw = lines[idx]
+        if not raw:
+            continue
+        line = _normalize_heading_line(raw)
+        for pat in _MDA_END_MARKERS:
+            if pat.search(line):
+                return idx
+    return len(lines)
+
+
 def extract_sections(html_text: str) -> dict[str, str]:
     """Extract known 10-K sections from raw filing HTML.
 
@@ -291,6 +433,13 @@ def extract_sections(html_text: str) -> dict[str, str]:
     3. For each canonical section, take the LAST matching line as the
        real body start (TOC entries come earlier in the document).
     4. Slice the lines list from that start to the next section's start.
+    5. If MD&A came back implausibly short (< ``_MDA_MIN_REASONABLE_CHARS``)
+       run a section-title fallback that searches for the
+       ``Management's Discussion and Analysis`` heading directly and
+       uses a prose-density signal to skip TOC entries and
+       chapter-divider banners. See :func:`_find_mda_fallback_start`
+       for the three real failure modes this addresses (JPM forward-
+       reference, BAC chapter-divider banner, XOM TOC-anchor repeats).
     """
     if not html_text:
         return {name: "" for name in SECTION_NAMES}
@@ -315,4 +464,47 @@ def extract_sections(html_text: str) -> dict[str, str]:
         body_lines = lines[start_idx + 1 : end_idx]
         body = "\n".join(line for line in body_lines if line is not None)
         result[name] = clean_section_text(body)
+
+    # --- MD&A section-title fallback ------------------------------------
+    # The primary Item-anchor heuristic above fails on three real
+    # patterns observed in our corpus (JPM/BAC/XOM). When the MD&A
+    # slice is implausibly short we re-run extraction for THIS section
+    # only using the section-title fallback. AAPL and MSFT (both well
+    # above the threshold) take this branch never; their extraction
+    # is unchanged.
+    mda_start = last_hit.get("MD&A")
+    if len(result["MD&A"]) < _MDA_MIN_REASONABLE_CHARS:
+        fallback_candidates = _find_mda_fallback_start(
+            lines,
+            current_start=mda_start if mda_start is not None else -1,
+        )
+        if fallback_candidates:
+            # Walk candidates in document order; accept the first one
+            # whose slice actually clears the reasonable-length floor.
+            # This filters out JPM's forward-reference paragraph
+            # (which looks dense in the next 30 lines but is followed
+            # immediately by an Item 7A end-marker that truncates the
+            # slice to a few hundred characters).
+            for fallback_start in fallback_candidates:
+                fallback_end = _find_mda_fallback_end(lines, fallback_start)
+                body_lines = lines[fallback_start + 1 : fallback_end]
+                body = "\n".join(line for line in body_lines if line is not None)
+                fallback_text = clean_section_text(body)
+                if len(fallback_text) >= _MDA_MIN_REASONABLE_CHARS:
+                    result["MD&A"] = fallback_text
+                    break
+            else:
+                # No candidate cleared the floor. Take the longest
+                # candidate slice we saw — better than the empty/tiny
+                # Item-anchor result — but never regress.
+                best_text = result["MD&A"]
+                for fallback_start in fallback_candidates:
+                    fallback_end = _find_mda_fallback_end(lines, fallback_start)
+                    body_lines = lines[fallback_start + 1 : fallback_end]
+                    body = "\n".join(line for line in body_lines if line is not None)
+                    candidate = clean_section_text(body)
+                    if len(candidate) > len(best_text):
+                        best_text = candidate
+                result["MD&A"] = best_text
+
     return result
