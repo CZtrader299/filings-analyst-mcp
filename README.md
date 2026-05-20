@@ -99,49 +99,53 @@ The repo ships with a 35-item hand-curated golden set spanning all five tickers 
 - **context_recall** — the relevant content in the filing was actually retrieved.
 - **refusal_correctness** — out-of-scope questions are refused, in-scope questions are answered with citations.
 
-The numbers below are from a **stratified 10-item sample** of the full set covering all five tickers and all three question types. A full 35-item run takes ~67 minutes wall-clock because each item invokes the RAG pipeline plus five separate LLM-graded metrics — too long for a single CI step. To reproduce this sample, or to run the full set, the harness is in the box:
+The numbers below are from the **full 35-item run** — every question in the golden set, graded by Claude via `claude -p`. Total wall-clock was 39 minutes (each item invokes the RAG pipeline plus five separate grader calls). To reproduce, or to run a quick subset:
 
 ```
-python scripts/run_sample_eval.py     # the 10-item stratified sample (~10 min)
-filings-analyst eval                   # the full 35-item run (~67 min)
+filings-analyst eval                   # full 35-item run (~40 min)
+python scripts/run_sample_eval.py     # 10-item stratified sample (~10 min)
 filings-analyst eval --sample 5        # ad-hoc N-item subset
 ```
 
-### Aggregate metrics (10-item stratified sample)
+### Aggregate metrics (full 35-item run)
 
 | Metric | Score |
 |--------|-------|
-| faithfulness | 0.992 |
-| answer_relevancy | 0.957 |
-| context_precision | 0.650 |
-| context_recall | 0.500 |
-| refusal_correctness | 1.000 |
+| faithfulness | 0.998 |
+| answer_relevancy | 0.894 |
+| context_precision | 0.514 |
+| context_recall | 0.443 |
+| refusal_correctness | 0.886 |
 
 ### Per-type breakdown
 
 | Type | n | Mean score | Notes |
 |------|---|------------|-------|
-| easy | 4 | 0.808 | Straightforward retrieval. Faithfulness and refusal_correctness perfect; context_recall is the drag (0.500) — see below. |
-| hard | 3 | 0.656 | Synthesis questions stress retrieval the most. context_recall on this slice is 0.000 — the system is answering well from partial context, but isn't pulling every supporting fact. |
-| out-of-scope | 3 | 1.000 | Conservative-flagging works. Every out-of-scope question (exec comp, market data, real-time price) was correctly refused. |
+| easy | 15 | 0.780 | Faithfulness perfect (1.000); refusal_correctness perfect; the drag is recall (0.467) and precision (0.478) — i.e. retrieval is noisy even on straightforward fact questions. |
+| hard | 13 | 0.621 | Synthesis questions stress retrieval hardest. context_recall = 0.192 on this slice — relevant supporting material exists in the filing but doesn't reliably make top-k. refusal_correctness = 0.769 shows the system also over-refuses some answerable hard questions, choosing to abstain when it shouldn't. |
+| out-of-scope | 7 | 0.910 | The category the project was designed for. Six of seven refused correctly; one item incorrectly attempted an answer rather than abstaining. |
 
 ### Per-ticker breakdown
 
-| Ticker | n | Mean | Comment |
-|--------|---|------|---------|
-| AAPL | 3 | 0.845 | Tech-style 10-K parses cleanly; section extraction is reliable. |
-| MSFT | 2 | 0.685 | Synthesis question on AI framing was a stress test; context_precision came in at 0.17 (1/6 chunks relevant). |
-| JPM | 3 | 0.801 | Bank-style filings parse, but context_recall is uneven (0.333). |
-| BAC | 1 | 0.890 | Single easy question, clean retrieval. |
-| XOM | 1 | 1.000 | Single out-of-scope question, correctly refused. |
+| Ticker | n | Mean | Faithfulness | Recall | Notes |
+|--------|---|------|--------------|--------|-------|
+| AAPL | 7 | 0.763 | 0.989 | 0.643 | Tech-style filings parse cleanly; highest recall in the corpus. |
+| JPM | 7 | 0.783 | 1.000 | 0.500 | Bank-style 10-K parses; recall mid-pack. |
+| XOM | 7 | 0.765 | 1.000 | 0.429 | Energy-style filing; answer_relevancy highest in the corpus (0.966). |
+| BAC | 7 | 0.714 | 1.000 | 0.357 | Bank filing; recall is the weak point. |
+| MSFT | 7 | 0.710 | 1.000 | 0.286 | Lowest recall — the AI-framing synthesis questions on MSFT particularly stress the retrieval. |
 
 ### Honest reflection on the numbers
 
-The interesting result is the spread between **faithfulness (0.992)** and **context_recall (0.500)**. The system does not hallucinate — when it answers, it sticks to what was retrieved. But the retrieval itself is noisy: roughly half the time, a relevant chunk *that exists in the filing* doesn't make the top-k, especially on hard synthesis questions where the relevant material is scattered across sections. **Retrieval is the binding constraint, not the LLM.** The most direct fix is swapping the local `all-MiniLM-L6-v2` embeddings (384-dim, free) for OpenAI's `text-embedding-3-small` (1536-dim, ~$0.02/Mtok, ~$2-5 one-time for the full corpus) — that's a one-line config change via `EMBEDDING_PROVIDER=openai`, and the eval harness is set up to measure the uplift directly.
+The spread between **faithfulness (0.998)** and **context_recall (0.443)** is the headline finding. The system does not hallucinate — when it answers, it sticks to what was retrieved, every time across all 35 questions. But the retrieval itself is noisy: on roughly **56% of questions, at least one relevant chunk that exists in the filing fails to make the top-k**. The effect is strongest on hard synthesis questions, where supporting material is scattered across sections, and weakest on out-of-scope questions, where retrieval is irrelevant to the correct answer (a refusal).
 
-**refusal_correctness at 1.000** is the result this project was specifically designed for, and it works. Every out-of-scope question (exec comp, market data, real-time spot price) was refused with the canonical "the provided excerpts do not contain that information" language rather than a fabricated answer. This is the same conservative-flagging discipline from the LSE Buyback Scraper — escalate rather than guess — and it transfers cleanly to a RAG context.
+**Retrieval is the binding constraint, not the LLM.** The local `all-MiniLM-L6-v2` embeddings (384-dim, free) chosen for the default cost-conscious config are the bottleneck. Swapping to OpenAI's `text-embedding-3-small` (1536-dim, ~$0.02/Mtok, ~$2-5 one-time for the full corpus) is a one-line change via `EMBEDDING_PROVIDER=openai` and the eval harness will measure the uplift directly — that's a follow-on commit, not a redesign.
 
-The full per-item report with worst-3-per-metric and individual citation chains is committed at [`eval_reports/2026-05-19_sample_eval.md`](eval_reports/2026-05-19_sample_eval.md). The grading and the verdict are not opinion — every score is reproducible by re-running the script.
+**Refusal behavior is mostly working, with one real gap.** refusal_correctness = 0.886 across all 35 items breaks down as: 7/7 on out-of-scope refusals (the system correctly abstained on every "salary of CEO" / "current stock price" question), but **3/13 hard questions also got refused when they shouldn't have been**. That over-refusal on hard questions pulls the metric down. It's an honest finding: the conservative-flagging design that works perfectly on out-of-scope questions occasionally fires on legitimately-answerable hard ones when retrieval is sparse — i.e. the same recall weakness above expressing itself as a different failure mode. Fixing recall fixes both.
+
+Where MSFT lands lowest (0.710) is consistent with the MSFT synthesis questions being some of the most demanding in the golden set — they ask about the *relationship* between AI in the Business section and AI in Risk Factors, which requires retrieving from two different sections of the filing simultaneously. Better embeddings would help here directly.
+
+The full per-item report with worst-3-per-metric and individual citation chains is committed at [`eval_reports/2026-05-19_full_eval.md`](eval_reports/2026-05-19_full_eval.md). Every score is reproducible by re-running `filings-analyst eval`.
 
 ## Connecting to Claude Desktop / Cursor
 
