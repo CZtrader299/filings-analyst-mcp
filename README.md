@@ -8,7 +8,7 @@ The RAG pipeline runs end-to-end against both single filings (`ask_filing`) and 
 
 ## Why this exists
 
-This is a portfolio project demonstrating three things at once: a working MCP server implementation, a real RAG pipeline with a formal evaluation harness (real precision/recall metrics, not vibes), and the same multi-provider AI architecture used in my LSE Buyback Scraper at [github.com/CZtrader299/lse-buyback-scraper](https://github.com/CZtrader299/lse-buyback-scraper). The differentiator over the average "RAG over 10-Ks" portfolio project is the eval harness. Anyone can wire up a vector store; far fewer projects measure their retrieval quality honestly.
+This is a portfolio project demonstrating three things at once: a working MCP server implementation, a real RAG pipeline with a formal evaluation harness (real precision/recall metrics, not vibes), and the same multi-provider AI architecture used in my LSE Buyback Scraper at [github.com/krawczun/lse-buyback-scraper](https://github.com/krawczun/lse-buyback-scraper). The differentiator over the average "RAG over 10-Ks" portfolio project is the eval harness. Anyone can wire up a vector store; far fewer projects measure their retrieval quality honestly.
 
 ## Architecture (current)
 

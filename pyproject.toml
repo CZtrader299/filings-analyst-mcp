@@ -47,7 +47,7 @@ dev = [
 filings-analyst = "filings_analyst.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/CZtrader299/filings-analyst-mcp"
+Homepage = "https://github.com/krawczun/filings-analyst-mcp"
 Author = "https://krawczun.com"
 
 [tool.setuptools.packages.find]
